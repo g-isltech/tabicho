@@ -1,0 +1,42 @@
+# 旅帳（tabicho）
+
+日本一周のような長い旅の、行程・予約・お金・やりたいこと・日記を、地図と一緒に管理する Web アプリです。
+
+- サーバーを持ちません。データは使う人の端末のブラウザ（IndexedDB）の中だけに保存します
+- スマホでは「ホーム画面に追加」して、アプリのように使います（PWA）
+- すべての旅と写真を zip に書き出し・読み込みできます
+- 写真は端末の中で縮小してから保存します。撮影場所などの情報はこのとき消えます
+- 地名での場所探しにだけ、国土地理院の住所検索を使います（探す言葉だけを送ります）
+
+公開先: https://g-isltech.github.io/tabicho/
+
+## 開発
+
+```sh
+npm ci
+npm run dev      # 開発用サーバー
+npm run build    # 型チェックとビルド（dist/ に出力）
+npm run preview  # ビルドしたものを確認
+```
+
+- TypeScript + Vite。画面の本体（`src/app.js`）は試作版から移したもので、これから少しずつ TypeScript に置き換える
+- `src/store.ts`: 端末内の保存（IndexedDB）。消したデータも「消した印」を付けて残す（あとでドライブと同期するため）
+- `src/photos.ts`: 写真の縮小と保存
+- `src/backup.ts`: zip の書き出し・読み込み
+- `public/japan.json`: 都道府県の形（地球地図日本（国土地理院）を加工）
+
+## 公開
+
+`main` に push すると、GitHub Actions がビルドして GitHub Pages に公開します（`.github/workflows/deploy.yml`）。
+初回だけ、リポジトリの Settings → Pages → Build and deployment の Source を「GitHub Actions」にする必要があります。
+
+## これからやること
+
+1. ~~端末内の保存だけで動く版~~（この版）
+2. Google ドライブでの共有（夫婦など2人で同じ旅を編集する）
+3. 一般公開の準備（プライバシーポリシーなど）
+
+## 出典
+
+- 地図: 地球地図日本（国土地理院）を加工して作成
+- 場所の検索: 国土地理院 住所検索 API
