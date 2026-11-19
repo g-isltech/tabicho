@@ -7,6 +7,19 @@ export function startApp(ctx) {
     ['北海道', '#23406B'], ['東北', '#1F7470'], ['関東', '#2B5F94'], ['中部', '#7A4E2D'],
     ['近畿', '#8A5A12'], ['中国', '#6B4C9A'], ['四国', '#2F7A4A'], ['九州・沖縄', '#B4492E']
   ];
+  // 都道府県庁のおおよその位置（PREFS と同じ並び）。場所の検索ができないときの目安に使う
+  const PREF_POS = [[43.06,141.35],[40.82,140.74],[39.70,141.15],[38.27,140.87],[39.72,140.10],[38.24,140.36],[37.75,140.47],[36.34,140.45],[36.57,139.88],[36.39,139.06],[35.86,139.65],[35.61,140.12],[35.69,139.69],[35.45,139.64],[37.90,139.02],[36.70,137.21],[36.59,136.63],[36.07,136.22],[35.66,138.57],[36.65,138.18],[35.39,136.72],[34.98,138.38],[35.18,136.91],[34.73,136.51],[35.00,135.87],[35.02,135.76],[34.69,135.52],[34.69,135.18],[34.69,135.83],[34.23,135.17],[35.50,134.24],[35.47,133.05],[34.66,133.93],[34.40,132.46],[34.19,131.47],[34.07,134.56],[34.34,134.04],[33.84,132.77],[33.56,133.53],[33.61,130.42],[33.25,130.30],[32.74,129.87],[32.79,130.74],[33.24,131.61],[31.91,131.42],[31.56,130.56],[26.21,127.68]];
+  // 地名から位置を探す（国土地理院の住所検索）。都道府県が分かっていれば、その県の結果を優先する
+  async function geocode(place, pref) {
+    const q = (pref && !String(place).startsWith(pref) ? pref : '') + place;
+    const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 5000);
+    try {
+      const r = await fetch('https://msearch.gsi.go.jp/address-search/AddressSearch?q=' + encodeURIComponent(q), { signal: ctl.signal });
+      const list = await r.json(); if (!Array.isArray(list) || !list.length) return null;
+      const hit = list.find((f) => !pref || String(f.properties && f.properties.title).startsWith(pref)) || list[0];
+      const [lng, lat] = hit.geometry.coordinates; return { lat: Math.round(lat * 10000) / 10000, lng: Math.round(lng * 10000) / 10000 };
+    } catch (e) { return null; } finally { clearTimeout(tm); }
+  }
   // 都道府県の並び（PREFS）の何番目からどの地方か
   const regionOfPref = (name) => { const i = PREFS.findIndex((p) => name && String(name).startsWith(p)); if (i < 0) return -1; return i === 0 ? 0 : i <= 6 ? 1 : i <= 13 ? 2 : i <= 22 ? 3 : i <= 29 ? 4 : i <= 34 ? 5 : i <= 38 ? 6 : 7; };
   const LODG = { '車中泊': '#2B5F94', '安い宿': '#9A958B', '温泉旅館': '#C2581B', '船中泊': '#1F7470' };
@@ -369,8 +382,8 @@ export function startApp(ctx) {
     const where = s ? '<p class="sub">' + mdw(s.start) + '〜' + mdw(s.end) + '</p>' : (atEnd ? '<p class="sub">行程の最後に入ります</p>' : '<p class="sub">「' + esc(insertAfter.place) + '」のあとに入ります</p>');
     openSheet('<h2>' + esc(title) + '</h2>' + where +
       '<form id="stop-form" style="display:flex;flex-direction:column;gap:12px">' +
-      '<div class="grid2"><label class="f">泊まる場所<input class="i" id="sf-place" required value="' + esc(base.place) + '"></label><label class="f">都道府県<input class="i" id="sf-pref" value="' + esc(base.pref) + '"></label></div>' +
-      '<div class="f">地図上の位置<div class="row"><span class="grow num" id="sf-pos" style="font-size:13px;color:var(--muted)">' + (s || !atEnd ? (typeof base.lat === 'number' ? '北緯' + pos.lat.toFixed(2) + '・東経' + pos.lng.toFixed(2) : '未設定') : '未設定') + '</span><button class="btn small" type="button" id="sf-pick">地図で位置を決める</button></div><div id="sf-map"></div></div>' +
+      '<div class="grid2"><label class="f">泊まる場所<input class="i" id="sf-place" required value="' + esc(base.place) + '"></label><label class="f">都道府県<select class="i" id="sf-pref"><option value="">選んでください</option>' + PREFS.map((x) => '<option' + (base.pref === x ? ' selected' : '') + '>' + x + '</option>').join('') + (base.pref && !PREFS.includes(base.pref) ? '<option selected>' + esc(base.pref) + '</option>' : '') + '</select></label></div>' +
+      '<div class="f">地図上の位置<div class="row"><span class="grow num" id="sf-pos" style="font-size:13px;color:var(--muted)">' + (s && typeof s.lat === 'number' ? '北緯' + pos.lat.toFixed(2) + '・東経' + pos.lng.toFixed(2) : '保存するときに、場所の名前と都道府県から自動で決めます') + '</span>' + '<button class="btn small" type="button" id="sf-pick">地図で位置を決める</button></div><div id="sf-map"></div></div>' +
       '<div class="grid2"><label class="f">ここへの移動<select class="i" id="sf-arrive">' + [['car', '車'], ['ship', '船'], ['plane', '飛行機']].map((x) => '<option value="' + x[0] + '"' + ((base.arrive || 'car') === x[0] ? ' selected' : '') + '>' + x[1] + '</option>').join('') + '</select></label>' +
       '<label class="f">地方<select class="i" id="sf-region">' + REG.map((r, i) => '<option value="' + i + '"' + (+base.region === i ? ' selected' : '') + '>' + esc(r[0]) + '</option>').join('') + '</select></label></div>' +
       '<div class="grid2"><label class="f">泊数<input class="i num" id="sf-nights" type="number" inputmode="numeric" min="0" max="14" value="' + (+base.nights || 0) + '"></label>' +
@@ -392,19 +405,29 @@ export function startApp(ctx) {
         pos = p; posChanged = true; $('#sf-pos').textContent = '北緯' + p.lat.toFixed(2) + '・東経' + p.lng.toFixed(2) + '（保存すると反映）';
         if (title) {
           const pref = PREFS.find((x) => title.startsWith(x));
-          if (pref && !$('#sf-pref').value.trim()) $('#sf-pref').value = pref;
+          if (pref && !$('#sf-pref').value) $('#sf-pref').value = pref;
           const rg = regionOfPref(title); if (rg >= 0) $('#sf-region').value = String(rg);
           if (!$('#sf-place').value.trim()) $('#sf-place').value = title.replace(/^(北海道|東京都|大阪府|京都府|.{2,3}県)/, '');
         }
       });
     });
+    $('#sf-pref').addEventListener('change', () => { const rg = regionOfPref($('#sf-pref').value); if (rg >= 0) $('#sf-region').value = String(rg); });
     $('#stop-form').addEventListener('submit', async (e) => {
       e.preventDefault(); if (!can()) return;
       const data = { place: $('#sf-place').value.trim(), pref: $('#sf-pref').value.trim(), nights: Math.max(0, Math.min(14, parseInt($('#sf-nights').value, 10) || 0)),
         kind: $('#sf-kind').value, lodging: $('#sf-lodging').value, booking: $('#sf-booking').value, lodgingName: $('#sf-lname').value.trim(),
         cost: Math.max(0, parseInt($('#sf-cost').value, 10) || 0), what: $('#sf-what').value.trim(), memo: $('#sf-memo').value.trim(),
         arrive: $('#sf-arrive').value, region: parseInt($('#sf-region').value, 10) || 0 };
-      if (posChanged || !s) { data.lat = pos.lat; data.lng = pos.lng; }
+      // 地図で決めていないときは、名前か都道府県が変わった（または新しく作った）ときに位置を探し直す
+      let posNote = '';
+      if (posChanged) { data.lat = pos.lat; data.lng = pos.lng; }
+      else if (!s || data.place !== s.place || data.pref !== s.pref || typeof s.lat !== 'number') {
+        const g = data.place ? await geocode(data.place, data.pref) : null;
+        const pi = PREFS.indexOf(data.pref);
+        if (g) { data.lat = g.lat; data.lng = g.lng; posNote = '位置は「' + data.place + '」で探して決めました'; }
+        else if (pi >= 0) { data.lat = PREF_POS[pi][0]; data.lng = PREF_POS[pi][1]; posNote = '場所が見つからなかったので、' + data.pref + 'の県庁のあたりに置きました。「地図で位置を決める」で直せます'; }
+        else if (!s) { data.lat = pos.lat; data.lng = pos.lng; posNote = '位置が決まっていません。「地図で位置を決める」で決めてください'; }
+      }
       try {
         let sid;
         if (s) { sid = s.id; await S.db.doc('stops/' + s.id).update(data); }
@@ -414,7 +437,7 @@ export function startApp(ctx) {
           else { const i = sch.findIndex((x) => x.id === insertAfter.id); const nx = sch[i + 1]; order = nx ? (insertAfter.order + nx.order) / 2 : insertAfter.order + 10; }
           const r = await S.db.collection('stops').add({ ...data, order }); sid = r.id;
         }
-        closeSheet(); toast('保存しました');
+        closeSheet(); toast(posNote ? '保存しました。' + posNote : '保存しました');
       } catch (er) { fail(er); }
     });
     if (s) {
@@ -568,13 +591,14 @@ export function startApp(ctx) {
     const elapsed = ti.phase === 'before' ? 0 : ti.phase === 'after' ? days : Math.min(days, ti.day);
     const planNow = totalB * elapsed / days;
     const diff = spent - planNow;
-    let h = '<section class="card" style="display:flex;flex-direction:column;gap:14px"><div class="sec-h"><h2>お金</h2><button class="btn small" id="bud-edit"' + (can() ? '' : ' disabled') + '>予算を編集</button></div>' +
+    const noBudget = totalB <= 0;
+    let h = (noBudget ? '<section class="card" style="display:flex;flex-direction:column;gap:10px;border-color:var(--road)"><h2>まず予算を決めましょう</h2><p style="margin:0">予算を決めると、使いすぎていないかを項目ごとに確かめられます。総額を入れるだけでも始められます。</p><button class="btn primary" id="bud-edit2"' + (can() ? '' : ' disabled') + '>予算を決める</button></section>' : '') + '<section class="card" style="display:flex;flex-direction:column;gap:14px"><div class="sec-h"><h2>お金</h2><button class="btn small" id="bud-edit"' + (can() ? '' : ' disabled') + '>予算を編集</button></div>' +
       '<div class="row" style="align-items:flex-end;gap:20px"><div><p class="sub">使った額</p><div class="big">' + man(spent) + '</div></div><div><p class="sub">予算</p><div class="num" style="font-size:20px;font-weight:700">' + man(totalB) + '</div></div>' +
-      '<div><p class="sub">残り</p><div class="num" style="font-size:20px;font-weight:700;color:' + (totalB - spent < 0 ? 'var(--warm)' : 'var(--ink)') + '">' + man(totalB - spent) + '</div></div></div>' +
-      (ti.phase === 'during' ? '<p class="sub">今日までの予定は' + man(planNow) + '。' + (diff > 0 ? '<b style="color:var(--warm)">' + man(diff) + '使いすぎ</b>' : '<b style="color:var(--ok)">' + man(-diff) + '余裕あり</b>') + 'です</p>' : (ti.phase === 'before' ? '<p class="sub">出発前です。前払いの予約などもここに記録できます</p>' : '')) +
+      '<div><p class="sub">残り</p><div class="num" style="font-size:20px;font-weight:700;color:' + (!noBudget && totalB - spent < 0 ? 'var(--warm)' : 'var(--ink)') + '">' + (noBudget ? '予算なし' : man(totalB - spent)) + '</div></div></div>' +
+      (ti.phase === 'during' && !noBudget ? '<p class="sub">今日までの予定は' + man(planNow) + '。' + (diff > 0 ? '<b style="color:var(--warm)">' + man(diff) + '使いすぎ</b>' : '<b style="color:var(--ok)">' + man(-diff) + '余裕あり</b>') + 'です</p>' : (ti.phase === 'before' ? '<p class="sub">出発前です。前払いの予約などもここに記録できます</p>' : '')) +
       '<div style="display:flex;flex-direction:column;gap:10px">' + CATS.map((c) => {
-        const b = budgetOf(c.b), v = byCat[c.k] || 0, p = b ? Math.min(100, v / b * 100) : (v ? 100 : 0);
-        return '<div class="cat"><span>' + esc(c.k) + '</span><div class="bar" role="img" aria-label="' + esc(c.k + ' 予算' + man(b) + 'のうち' + man(v)) + '"><b class="' + (v > b ? 'over' : '') + '" style="width:' + p.toFixed(1) + '%"></b></div><span class="v">' + man(v) + ' / ' + man(b) + '</span></div>';
+        const b = budgetOf(c.b), v = byCat[c.k] || 0, p = b ? Math.min(100, v / b * 100) : 0;
+        return '<div class="cat"><span>' + esc(c.k) + '</span><div class="bar" role="img" aria-label="' + esc(c.k + ' 予算' + man(b) + 'のうち' + man(v)) + '"><b class="' + (b > 0 && v > b ? 'over' : '') + '" style="width:' + p.toFixed(1) + '%"></b></div><span class="v">' + man(v) + ' / ' + man(b) + '</span></div>';
       }).join('') + '</div><p class="sub">「その他」は予備費の予算から使います</p></section>';
     h += '<section class="card" style="display:flex;flex-direction:column;gap:12px"><h3>出費を記録</h3><form id="ex-form" style="display:flex;flex-direction:column;gap:12px">' +
       '<div class="grid2"><label class="f">金額（円）<input class="i num" id="ex-amt" type="number" inputmode="numeric" min="1" required placeholder="例: 1800"></label>' +
@@ -616,9 +640,17 @@ export function startApp(ctx) {
     return '<div class="sec-h"><h3>予定と実際の累計</h3><span class="sub">点線が予算どおりのペース</span></div>' + svg + (ti.phase === 'before' ? '<p class="sub">旅が始まると、青い線が伸びていきます</p>' : '');
   }
   function budgetSheet() {
-    openSheet('<h2>予算を編集</h2><p class="sub">万円で入れてください</p><form id="bud-form" style="display:flex;flex-direction:column;gap:12px">' +
+    openSheet('<h2>予算を決める</h2>' +
+      '<div class="link-box"><label class="f">総額から割り振る（万円）<div class="row"><input class="i num grow" type="number" inputmode="decimal" step="1" min="0" id="bud-total" placeholder="例: 400"><button class="btn" type="button" id="bud-split">割り振る</button></div></label>' +
+      '<p class="sub" style="margin:0">宿泊38%・食費26%・交通10%・ガソリン・高速9%・観光・体験7%・予備費10%で分けます。分けたあとに項目ごとに直せます</p></div>' +
+      '<p class="sub">項目ごとに万円で入れてください</p><form id="bud-form" style="display:flex;flex-direction:column;gap:12px">' +
       CATS.map((c) => '<label class="f">' + esc(c.b) + (c.hint ? '（' + esc(c.hint) + '）' : '') + '<input class="i num" type="number" inputmode="decimal" step="0.1" min="0" data-bud="' + esc(c.b) + '" value="' + (budgetOf(c.b) / 10000) + '"></label>').join('') +
       '<div class="row"><button class="btn primary grow" type="submit">保存</button><button class="btn" type="button" data-close>閉じる</button></div></form>');
+    $('#bud-split').addEventListener('click', () => {
+      const t = parseFloat($('#bud-total').value) || 0; if (!t) { toast('総額を入れてください'); return; }
+      const ratio = { '宿泊': 0.38, '食費': 0.26, '交通': 0.10, 'ガソリン・高速': 0.09, '観光・体験': 0.07, '予備費': 0.10 };
+      document.querySelectorAll('[data-bud]').forEach((i) => { i.value = String(Math.round(t * (ratio[i.dataset.bud] || 0) * 10) / 10); });
+    });
     $('#bud-form').addEventListener('submit', async (e) => {
       e.preventDefault(); const d = {}; document.querySelectorAll('[data-bud]').forEach((i) => { d[i.dataset.bud] = Math.round((parseFloat(i.value) || 0) * 10000); });
       try { await S.db.doc('meta/budget').set(d); closeSheet(); toast('予算を保存しました'); } catch (er) { fail(er); }
@@ -695,13 +727,13 @@ export function startApp(ctx) {
     const e = S.diary[k] || {};
     const exists = diaryHas(e);
     const photos = Array.isArray(e.photos) ? e.photos : [];
-    const place = e.place !== undefined ? e.place : plannedPlace(sch, k);
+    const place = e.place !== undefined ? e.place : '';
     const planned = plannedPlace(sch, k);
     let h = '<section class="card" style="display:flex;flex-direction:column;gap:12px" id="diary-editor"><div class="sec-h"><h2>' + (exists ? '日記を直す' : '日記を書く') + '</h2>' +
       (exists ? '<span class="pill booked">保存済み</span>' : '') + '</div>' +
       '<div class="row"><button class="btn small" data-dd="-1" aria-label="前の日">‹ 前の日</button><input class="i grow" type="date" id="diary-date" value="' + esc(k) + '" aria-label="日付"><button class="btn small" data-dd="1" aria-label="次の日">次の日 ›</button></div>' +
-      '<label class="f">いた場所<input class="i" id="diary-place" value="' + esc(place) + '" placeholder="例: 函館"></label>' +
-      (planned && planned !== place ? '<p class="sub">今の行程では、この日は「' + esc(planned) + '」の予定です</p>' : '') +
+      '<label class="f">いた場所<input class="i" id="diary-place" value="' + esc(place) + '" placeholder="' + esc(planned ? '空のままなら「' + planned + '」になります' : '例: 函館') + '"></label>' +
+      (planned && !place ? '<p class="sub">行程では、この日は「' + esc(planned) + '」の予定です。違う所にいたら、場所を入れてください</p>' : (planned && planned !== place ? '<p class="sub">行程では、この日は「' + esc(planned) + '」の予定です</p>' : '')) +
       '<label class="f">' + mdw(dd) + 'のこと<textarea class="i" id="diary-text" placeholder="行った所、食べた物、ひと言">' + esc(e.text) + '</textarea></label>' +
       (photos.length ? '<div class="photos">' + photos.map((p) => '<div class="ph-wrap"><button type="button" class="view" data-view-photo="' + esc(p) + '" aria-label="写真を大きく見る"><img src=\"' + esc(ctx.assets.src(p)) + '" alt="' + esc(mdw(dd)) + 'の写真" loading="lazy"></button>' +
         (can() ? '<button type="button" class="x" data-del-photo="' + esc(p) + '" aria-label="この写真を外す">×</button>' : '') + '</div>').join('') + '</div>' : '') +
@@ -732,7 +764,8 @@ export function startApp(ctx) {
     const k = UI.diaryDate, cur = S.diary[k] || {};
     const ta = $('#diary-text'), pi = $('#diary-place');
     const text = ta ? ta.value : (cur.text || '');
-    const place = pi ? pi.value.trim() : (cur.place !== undefined ? cur.place : plannedPlace(schedule(), k));
+    const typed = pi ? pi.value.trim() : (cur.place !== undefined ? cur.place : '');
+    const place = typed || plannedPlace(schedule(), k);
     const photos = (Array.isArray(cur.photos) ? cur.photos : []).filter((p) => p !== removePhoto).concat(extraPhotos || []);
     try {
       await S.db.doc('diary/' + k).set({ text, place, photos, by: S.me || '', at: Date.now() });
@@ -766,7 +799,7 @@ export function startApp(ctx) {
     if (t.dataset.autoUn) { const [ty, id] = t.dataset.autoUn.split('|'); const box = $('#auto-box'); if (box) box.dataset.key = t.dataset.autoUn; await unrecordAuto(ty, id); if (!box) closeSheet(); setTimeout(refreshAutoBox, 400); return; }
     if (t.dataset.move && can()) { const [id, d] = t.dataset.move.split('|'); moveStop(id, +d); return; }
     if (t.id === 'plan-add') { stopSheet(null, null); return; }
-    if (t.id === 'bud-edit') { budgetSheet(); return; }
+    if (t.id === 'bud-edit' || t.id === 'bud-edit2') { budgetSheet(); return; }
     if (t.dataset.cat) { document.querySelectorAll('#ex-cats [data-cat]').forEach((b) => { const on = b === t; b.setAttribute('aria-pressed', String(on)); b.setAttribute('aria-checked', String(on)); }); return; }
     if (t.dataset.delEx) {
       const id = t.dataset.delEx;
