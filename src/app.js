@@ -162,7 +162,7 @@ export function startApp(ctx) {
   }
   function vMap(sch, ti) {
     return '<section class="card map-card" aria-label="旅の地図">' +
-      '<div class="map-chips"><div class="chips" role="group" aria-label="地域で拡大">' + ZONES.map((z, i) => '<button class="chip" data-zone="' + i + '" aria-pressed="' + (UI.zone === i) + '">' + z[0] + '</button>').join('') + '</div></div>' +
+      '<div class="map-chips"><div class="chips scroll" role="group" aria-label="地域で拡大">' + ZONES.map((z, i) => '<button class="chip" data-zone="' + i + '" aria-pressed="' + (UI.zone === i) + '">' + z[0] + '</button>').join('') + '</div></div>' +
       '<div class="map-box" id="mapbox"><svg id="mapsvg" role="img" aria-label="日本地図。泊まる場所と、回る順番の線"><g id="g-pref"></g><g id="g-route"></g><g id="g-pin"></g></svg>' +
       '<div class="map-tools"><button type="button" data-zoom="in" aria-label="拡大">＋</button><button type="button" data-zoom="out" aria-label="縮小">−</button></div></div>' +
       '<div class="map-legend"><span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--road)" stroke-width="3"/></svg>車</span>' +
@@ -628,7 +628,7 @@ export function startApp(ctx) {
       (ti.phase === 'during' && !noBudget ? '<p class="sub">今日までの予定は' + man(planNow) + '。' + (diff > 0 ? '<b style="color:var(--warm)">' + man(diff) + '使いすぎ</b>' : '<b style="color:var(--ok)">' + man(-diff) + '余裕あり</b>') + 'です</p>' : (ti.phase === 'before' ? '<p class="sub">出発前です。前払いの予約などもここに記録できます</p>' : '')) +
       '<div style="display:flex;flex-direction:column;gap:10px">' + CATS.map((c) => {
         const b = budgetOf(c.b), v = byCat[c.k] || 0, p = b ? Math.min(100, v / b * 100) : 0;
-        return '<div class="cat"><span>' + esc(c.k) + '</span><div class="bar" role="img" aria-label="' + esc(c.k + ' 予算' + man(b) + 'のうち' + man(v)) + '"><b class="' + (b > 0 && v > b ? 'over' : '') + '" style="width:' + p.toFixed(1) + '%"></b></div><span class="v">' + man(v) + ' / ' + man(b) + '</span></div>';
+        return '<div class="cat"><span class="k">' + esc(c.k) + '</span><div class="bar" role="img" aria-label="' + esc(c.k + ' 予算' + man(b) + 'のうち' + man(v)) + '"><b class="' + (b > 0 && v > b ? 'over' : '') + '" style="width:' + p.toFixed(1) + '%"></b></div><span class="v">' + man(v) + ' / ' + man(b) + '</span></div>';
       }).join('') + '</div><p class="sub">「その他」は予備費の予算から使います</p></section>';
     h += '<section class="card" style="display:flex;flex-direction:column;gap:12px"><h3>出費を記録</h3><form id="ex-form" style="display:flex;flex-direction:column;gap:12px">' +
       '<div class="grid2"><label class="f">金額（円）<input class="i num" id="ex-amt" type="number" inputmode="numeric" min="1" required placeholder="例: 1800"></label>' +
@@ -697,8 +697,8 @@ export function startApp(ctx) {
     const pct = tot ? dn / tot : 0, R0 = 40, C0 = 2 * Math.PI * R0;
     let h = '<section class="card" style="display:flex;flex-direction:column;gap:14px"><div class="row" style="gap:16px">' +
       '<svg class="ring" viewBox="0 0 96 96" role="img" aria-label="達成 ' + Math.round(pct * 100) + '%"><circle cx="48" cy="48" r="' + R0 + '" fill="none" stroke="var(--sunk)" stroke-width="10"/><circle cx="48" cy="48" r="' + R0 + '" fill="none" stroke="var(--road)" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (C0 * pct).toFixed(1) + ' ' + C0.toFixed(1) + '" transform="rotate(-90 48 48)"/><text x="48" y="54" text-anchor="middle" font-size="20" font-weight="700" font-family="Inter,sans-serif" fill="var(--ink)">' + Math.round(pct * 100) + '%</text></svg>' +
-      '<div class="grow"><h2>やりたいこと</h2><p class="sub num">' + dn + ' / ' + tot + ' 達成</p><p class="sub num">見る ' + see[0] + '/' + see[1] + '・食べる ' + eat[0] + '/' + eat[1] + '</p></div>' +
-      '<button class="btn primary" id="wish-new"' + (can() ? '' : ' disabled') + '>＋ 追加</button></div>' +
+      '<div class="grow" style="min-width:140px"><h2>やりたいこと</h2><p class="sub num">' + dn + ' / ' + tot + ' 達成</p><p class="sub num">見る ' + see[0] + '/' + see[1] + '・食べる ' + eat[0] + '/' + eat[1] + '</p></div>' +
+      '<button class="btn primary wish-add" id="wish-new"' + (can() ? '' : ' disabled') + '>＋ 追加</button></div>' +
       '<div class="pgrid" role="group" aria-label="都道府県で絞り込み">' + codes.map((c) => {
         const p = S.wishPrefs[c]; const n = p.items.length, d = p.items.filter((w) => S.done[w.id]).length, v = n ? d / n : 0;
         return '<button class="ptile" data-pref="' + c + '" aria-pressed="' + (UI.wishPref === c) + '" style="background:color-mix(in srgb,var(--road) ' + Math.round(v * 60) + '%,var(--surface));' + (v > 0.55 ? 'color:var(--road-ink)' : '') + '">' + esc(p.pref) + '<small' + (v > 0.55 ? ' style="color:inherit"' : '') + '>' + d + '/' + n + '</small></button>';
@@ -761,7 +761,7 @@ export function startApp(ctx) {
     const planned = plannedPlace(sch, k);
     let h = '<section class="card" style="display:flex;flex-direction:column;gap:12px" id="diary-editor"><div class="sec-h"><h2>' + (exists ? '日記を直す' : '日記を書く') + '</h2>' +
       (exists ? '<span class="pill booked">保存済み</span>' : '') + '</div>' +
-      '<div class="row"><button class="btn small" data-dd="-1" aria-label="前の日">‹ 前の日</button><input class="i grow" type="date" id="diary-date" value="' + esc(k) + '" aria-label="日付"><button class="btn small" data-dd="1" aria-label="次の日">次の日 ›</button></div>' +
+      '<div class="row"><button class="btn small dd" data-dd="-1" aria-label="前の日">‹<span class="wide"> 前の日</span></button><input class="i grow" type="date" id="diary-date" value="' + esc(k) + '" aria-label="日付"><button class="btn small dd" data-dd="1" aria-label="次の日"><span class="wide">次の日 </span>›</button></div>' +
       '<label class="f">いた場所<input class="i" id="diary-place" value="' + esc(place) + '" placeholder="' + esc(planned ? '空のままなら「' + planned + '」になります' : '例: 函館') + '"></label>' +
       (planned && !place ? '<p class="sub">行程では、この日は「' + esc(planned) + '」の予定です。違う所にいたら、場所を入れてください</p>' : (planned && planned !== place ? '<p class="sub">行程では、この日は「' + esc(planned) + '」の予定です</p>' : '')) +
       '<label class="f">' + mdw(dd) + 'のこと<textarea class="i" id="diary-text" placeholder="行った所、食べた物、ひと言">' + esc(e.text) + '</textarea></label>' +

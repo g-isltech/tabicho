@@ -191,3 +191,28 @@ textarea.i{min-height:96px;resize:vertical;line-height:1.6}
 body.no-tabs .tabs{display:none}
 .export-banner{max-width:928px;margin:12px max(16px,env(safe-area-inset-left,0px)) 0}
 @media (min-width:960px){.export-banner{margin:12px auto 0}}
+
+/* ---- スマホの狭い幅での見直し ---- */
+.brand h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chips{flex-wrap:wrap;overflow-x:visible}
+.chips.scroll{flex-wrap:nowrap;overflow-x:auto}
+.cat{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"k v" "bar bar";row-gap:6px}
+.cat .k{grid-area:k;min-width:0}
+.cat .v{grid-area:v}
+.cat .bar{grid-area:bar}
+.wish-add{margin-left:auto}
+.wish{flex-wrap:wrap}
+.wish > label{flex:1 1 200px}
+.wish > .row{margin-left:auto}
+.dd{min-width:44px}
+.stop .t strong,.wish .n,.entry-text,.stop .w{overflow-wrap:anywhere}
+@media (max-width:480px){
+  #synctext{display:none}
+  .dd .wide{display:none}
+  .grid2{grid-template-columns:minmax(0,1fr)}
+  .grid2.keep{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .row > .btn{flex-shrink:0}
+}
+#sf-pos{flex:1 1 100%}
+.wish > .grow{flex:1 1 180px}
+.wish > .grow + .pill{margin-left:auto}
