@@ -11,12 +11,15 @@ export function startApp(ctx) {
   const PREF_POS = [[43.06,141.35],[40.82,140.74],[39.70,141.15],[38.27,140.87],[39.72,140.10],[38.24,140.36],[37.75,140.47],[36.34,140.45],[36.57,139.88],[36.39,139.06],[35.86,139.65],[35.61,140.12],[35.69,139.69],[35.45,139.64],[37.90,139.02],[36.70,137.21],[36.59,136.63],[36.07,136.22],[35.66,138.57],[36.65,138.18],[35.39,136.72],[34.98,138.38],[35.18,136.91],[34.73,136.51],[35.00,135.87],[35.02,135.76],[34.69,135.52],[34.69,135.18],[34.69,135.83],[34.23,135.17],[35.50,134.24],[35.47,133.05],[34.66,133.93],[34.40,132.46],[34.19,131.47],[34.07,134.56],[34.34,134.04],[33.84,132.77],[33.56,133.53],[33.61,130.42],[33.25,130.30],[32.74,129.87],[32.79,130.74],[33.24,131.61],[31.91,131.42],[31.56,130.56],[26.21,127.68]];
   // 地名から位置を探す（国土地理院の住所検索）。都道府県が分かっていれば、その県の結果を優先する
   async function geocode(place, pref) {
-    const q = (pref && !String(place).startsWith(pref) ? pref : '') + place;
+    const full = pref ? (pref === '北海道' ? '北海道' : pref === '東京' ? '東京都' : (pref === '京都' || pref === '大阪') ? pref + '府' : pref + '県') : '';
+    const q = (full && !String(place).startsWith(pref) ? full + ' ' : '') + place;
     const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 5000);
     try {
       const r = await fetch('https://msearch.gsi.go.jp/address-search/AddressSearch?q=' + encodeURIComponent(q), { signal: ctl.signal });
       const list = await r.json(); if (!Array.isArray(list) || !list.length) return null;
-      const hit = list.find((f) => !pref || String(f.properties && f.properties.title).startsWith(pref)) || list[0];
+      // 都道府県を選んでいるときは、その県の結果だけを使う（同じ地名がほかの県にあることがあるため）
+      const hit = full ? list.find((f) => String(f.properties && f.properties.title).startsWith(full)) : list[0];
+      if (!hit) return null;
       const [lng, lat] = hit.geometry.coordinates; return { lat: Math.round(lat * 10000) / 10000, lng: Math.round(lng * 10000) / 10000 };
     } catch (e) { return null; } finally { clearTimeout(tm); }
   }
@@ -165,6 +168,7 @@ export function startApp(ctx) {
       '<div class="map-legend"><span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--road)" stroke-width="3"/></svg>車</span>' +
       '<span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--ship)" stroke-width="3" stroke-dasharray="6 4"/></svg>船</span>' +
       '<span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--plane)" stroke-width="2.5" stroke-dasharray="2 4" stroke-linecap="round"/></svg>飛行機</span>' +
+      '<span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/></svg>最後の泊まりから出発地へ戻る</span>' +
       '<span><i class="lg" style="background:color-mix(in srgb,var(--road) 55%,var(--land))"></i>色が濃い県ほど「やりたい」を達成</span></div>' +
       '<p class="credit">地図: 地球地図日本（国土地理院）を加工</p></section>' +
       '<section class="card" id="mapsel">' + mapSel(sch, ti) + '</section>';
@@ -249,8 +253,10 @@ export function startApp(ctx) {
     const pts = sch.filter((s) => typeof s.lat === 'number');
     for (let i = 1; i <= pts.length; i++) {
       const a = pts[i - 1], b = i < pts.length ? pts[i] : pts[0];
-      const mode = i < pts.length ? (b.arrive || 'car') : 'car';
-      const sty = mode === 'ship' ? 'stroke="var(--ship)" stroke-width="' + (2.6 * u) + '" stroke-dasharray="' + (7 * u) + ' ' + (5 * u) + '"'
+      const mode = i < pts.length ? (b.arrive || 'car') : 'home';
+      if (mode === 'home' && pts.length < 2) continue;
+      const sty = mode === 'home' ? 'stroke="var(--muted)" stroke-width="' + (1.4 * u) + '" stroke-dasharray="' + (4 * u) + ' ' + (4 * u) + '" opacity=".7"'
+        : mode === 'ship' ? 'stroke="var(--ship)" stroke-width="' + (2.6 * u) + '" stroke-dasharray="' + (7 * u) + ' ' + (5 * u) + '"'
         : mode === 'plane' ? 'stroke="var(--plane)" stroke-width="' + (2.2 * u) + '" stroke-dasharray="' + (1 * u) + ' ' + (5 * u) + '" stroke-linecap="round"'
         : 'stroke="var(--road)" stroke-width="' + (3 * u) + '" stroke-linecap="round"';
       h += '<line x1="' + PX(a.lng).toFixed(1) + '" y1="' + PY(a.lat).toFixed(1) + '" x2="' + PX(b.lng).toFixed(1) + '" y2="' + PY(b.lat).toFixed(1) + '" ' + sty + ' fill="none"/>';
@@ -289,7 +295,8 @@ export function startApp(ctx) {
       '<div class="f">帰着日<div class="i num" style="display:flex;align-items:center">' + mdw(ti.end) + '</div></div></div>' +
       '<p class="sub">出発日や泊数を変えると、後ろの日付がすべて自動でずれます</p>' +
       (runs.length ? '<div class="band" role="group" aria-label="地方ごとの泊数">' + runs.map((r, i) => r.nights ? '<button style="flex:' + r.nights + ';background:' + rc(r.region) + '" data-jump="' + i + '" aria-label="' + esc((i + 1) + '. ' + rn(r.region) + ' ' + r.nights + '泊') + '">' + (r.nights >= 8 ? (i + 1) : '') + '</button>' : '').join('') + '</div>' : '') +
-      '<div class="row" style="font-size:12px;color:var(--muted);gap:14px">' + Object.keys(LODG).map((k) => '<span><i class="lg" style="background:' + LODG[k] + '"></i> ' + k + '</span>').join('') + '</div>' +
+      (runs.length ? '<div class="row" style="font-size:12px;color:var(--muted);gap:12px"><span>帯の色（地方）:</span>' + [...new Set(runs.map((r) => r.region))].map((r) => '<span><i class="lg" style="background:' + rc(r) + '"></i> ' + esc(rn(r)) + '</span>').join('') + '</div>' : '') +
+      '<div class="row" style="font-size:12px;color:var(--muted);gap:12px"><span>丸の色（泊まり方・1つ1泊）:</span>' + Object.keys(LODG).map((k) => '<span><i class="lg" style="background:' + LODG[k] + '"></i> ' + k + '</span>').join('') + '</div>' +
       '<button class="btn" id="plan-add"' + (can() ? '' : ' disabled') + '>＋ 泊まる場所を最後に追加</button></section>';
     if (!sch.length) return h + '<div class="empty">行程がまだありません。上の「＋ 泊まる場所を最後に追加」から1件目を作ってください</div>';
     runs.forEach((run, ri) => {
@@ -383,7 +390,7 @@ export function startApp(ctx) {
     openSheet('<h2>' + esc(title) + '</h2>' + where +
       '<form id="stop-form" style="display:flex;flex-direction:column;gap:12px">' +
       '<div class="grid2"><label class="f">泊まる場所<input class="i" id="sf-place" required value="' + esc(base.place) + '"></label><label class="f">都道府県<select class="i" id="sf-pref"><option value="">選んでください</option>' + PREFS.map((x) => '<option' + (base.pref === x ? ' selected' : '') + '>' + x + '</option>').join('') + (base.pref && !PREFS.includes(base.pref) ? '<option selected>' + esc(base.pref) + '</option>' : '') + '</select></label></div>' +
-      '<div class="f">地図上の位置<div class="row"><span class="grow num" id="sf-pos" style="font-size:13px;color:var(--muted)">' + (s && typeof s.lat === 'number' ? '北緯' + pos.lat.toFixed(2) + '・東経' + pos.lng.toFixed(2) : '保存するときに、場所の名前と都道府県から自動で決めます') + '</span>' + '<button class="btn small" type="button" id="sf-pick">地図で位置を決める</button></div><div id="sf-map"></div></div>' +
+      '<div class="f">地図上の位置<div class="row"><span class="grow num" id="sf-pos" style="font-size:13px;color:var(--muted)">' + (s && typeof s.lat === 'number' ? '北緯' + pos.lat.toFixed(2) + '・東経' + pos.lng.toFixed(2) : '保存するときに、場所の名前と都道府県から自動で決めます') + '</span>' + '<button class="btn small" type="button" id="sf-regeo">名前から探し直す</button><button class="btn small" type="button" id="sf-pick">地図で位置を決める</button></div><div id="sf-map"></div></div>' +
       '<div class="grid2"><label class="f">ここへの移動<select class="i" id="sf-arrive">' + [['car', '車'], ['ship', '船'], ['plane', '飛行機']].map((x) => '<option value="' + x[0] + '"' + ((base.arrive || 'car') === x[0] ? ' selected' : '') + '>' + x[1] + '</option>').join('') + '</select></label>' +
       '<label class="f">地方<select class="i" id="sf-region">' + REG.map((r, i) => '<option value="' + i + '"' + (+base.region === i ? ' selected' : '') + '>' + esc(r[0]) + '</option>').join('') + '</select></label></div>' +
       '<div class="grid2"><label class="f">泊数<input class="i num" id="sf-nights" type="number" inputmode="numeric" min="0" max="14" value="' + (+base.nights || 0) + '"></label>' +
@@ -410,6 +417,14 @@ export function startApp(ctx) {
           if (!$('#sf-place').value.trim()) $('#sf-place').value = title.replace(/^(北海道|東京都|大阪府|京都府|.{2,3}県)/, '');
         }
       });
+    });
+    $('#sf-regeo').addEventListener('click', async () => {
+      const place = $('#sf-place').value.trim(), pref = $('#sf-pref').value;
+      if (!place) { toast('先に泊まる場所の名前を入れてください'); return; }
+      $('#sf-pos').textContent = '探しています';
+      const g = await geocode(place, pref);
+      if (g) { pos = g; posChanged = true; $('#sf-pos').textContent = '北緯' + g.lat.toFixed(2) + '・東経' + g.lng.toFixed(2) + '（保存すると反映）'; }
+      else $('#sf-pos').textContent = (pref ? pref + 'で' : '') + '「' + place + '」が見つかりませんでした。「地図で位置を決める」で決めてください';
     });
     $('#sf-pref').addEventListener('change', () => { const rg = regionOfPref($('#sf-pref').value); if (rg >= 0) $('#sf-region').value = String(rg); });
     $('#stop-form').addEventListener('submit', async (e) => {
@@ -546,9 +561,24 @@ export function startApp(ctx) {
     if (!can()) return;
     try { await S.db.doc('expenses/' + autoId(type, id)).delete(); toast('出費から外しました'); } catch (er) { fail(er); }
   }
+  // 状態を切り替えたあとに、出費に記録するか（外すか）を聞く
+  function askAuto(type, id, status, label) {
+    const o = autoSrc(type, id); const amt = autoAmount(type, o);
+    const has = S.expenses.some((x) => x.id === autoId(type, id));
+    const key = esc(type + '|' + id);
+    if (status === 'paid' && amt > 0 && !has) {
+      openSheet('<h2>出費にも記録しますか？</h2><p style="margin:0">「' + esc(label) + '」を支払い済みにしました。' + yen(amt) + 'をお金の出費に記録できます。</p>' +
+        '<div class="row"><button class="btn primary grow" type="button" data-auto-rec="' + key + '" data-then-close="1">記録する（' + yen(amt) + '）</button><button class="btn" type="button" data-close>今はしない</button></div>');
+    } else if (status === 'paid' && !(amt > 0)) {
+      toast('支払い済みにしました。金額を入れると出費に記録できます');
+    } else if (status !== 'paid' && has) {
+      openSheet('<h2>出費から外しますか？</h2><p style="margin:0">「' + esc(label) + '」は支払い済みではなくなりました。出費に記録した分を外せます。</p>' +
+        '<div class="row"><button class="btn primary grow" type="button" data-auto-un="' + key + '" data-then-close="1">出費から外す</button><button class="btn" type="button" data-close>そのままにする</button></div>');
+    }
+  }
   function refreshAutoBox() {
     const box = $('#auto-box'); if (!box) return;
-    const btn = box.querySelector('[data-auto-rec],[data-auto-un]'); const key = btn ? (btn.dataset.autoRec || btn.dataset.autoUn) : box.dataset.key;
+    const btn = box.querySelector('[data-auto-rec],[data-auto-un]'); const key = box.dataset.key || (btn ? (btn.dataset.autoRec || btn.dataset.autoUn) : '');
     if (!key) return; box.dataset.key = key; const [type, id] = key.split('|'); box.innerHTML = autoBox(type, autoSrc(type, id) || { id });
   }
 
@@ -722,7 +752,7 @@ export function startApp(ctx) {
   const diaryHas = (d) => d && (String(d.text || '').trim() || (d.photos || []).length);
   function plannedPlace(sch, k) { const dt = parseD(k); const s = sch.find((x) => dt >= x.start && dt < x.end); return s ? s.place : ''; }
   function vDiary(sch, ti) {
-    if (!UI.diaryDate) UI.diaryDate = iso(ti.phase === 'during' ? ti.t : ti.start);
+    if (!UI.diaryDate || UI.diaryAuto) { UI.diaryDate = iso(today()); UI.diaryAuto = true; }
     const k = UI.diaryDate, dd = parseD(k);
     const e = S.diary[k] || {};
     const exists = diaryHas(e);
@@ -792,11 +822,11 @@ export function startApp(ctx) {
     if (t.dataset.bf) { UI.bookFilter = t.dataset.bf; render(); return; }
     if (t.id === 'bk-add') { bookingSheet(null); return; }
     if (t.dataset.editB) { bookingSheet(t.dataset.editB); return; }
-    if (t.dataset.cycleB && can()) { const b = S.bookings.find((x) => x.id === t.dataset.cycleB); if (b) try { const ns = nextStatus(b.status); await S.db.doc('bookings/' + b.id).update({ status: ns });  } catch (er) { fail(er); } return; }
-    if (t.dataset.cycleS && can()) { const s = S.stops.find((x) => x.id === t.dataset.cycleS); if (s) try { const ns = nextStatus(s.booking); await S.db.doc('stops/' + s.id).update({ booking: ns });  } catch (er) { fail(er); } return; }
+    if (t.dataset.cycleB && can()) { const b = S.bookings.find((x) => x.id === t.dataset.cycleB); if (b) try { const ns = nextStatus(b.status); await S.db.doc('bookings/' + b.id).update({ status: ns }); askAuto('booking', b.id, ns, b.title); } catch (er) { fail(er); } return; }
+    if (t.dataset.cycleS && can()) { const s = S.stops.find((x) => x.id === t.dataset.cycleS); if (s) try { const ns = nextStatus(s.booking); await S.db.doc('stops/' + s.id).update({ booking: ns }); askAuto('stop', s.id, ns, s.place + 'の宿代'); } catch (er) { fail(er); } return; }
     if (t.dataset.editEx) { expenseSheet(t.dataset.editEx); return; }
-    if (t.dataset.autoRec) { const [ty, id] = t.dataset.autoRec.split('|'); await recordAuto(ty, id); setTimeout(refreshAutoBox, 400); return; }
-    if (t.dataset.autoUn) { const [ty, id] = t.dataset.autoUn.split('|'); const box = $('#auto-box'); if (box) box.dataset.key = t.dataset.autoUn; await unrecordAuto(ty, id); if (!box) closeSheet(); setTimeout(refreshAutoBox, 400); return; }
+    if (t.dataset.autoRec) { if (t.disabled) return; t.disabled = true; const box = $('#auto-box'); if (box) box.dataset.key = t.dataset.autoRec; const [ty, id] = t.dataset.autoRec.split('|'); await recordAuto(ty, id); if (t.dataset.thenClose) closeSheet(); else refreshAutoBox(); return; }
+    if (t.dataset.autoUn) { const [ty, id] = t.dataset.autoUn.split('|'); const box = $('#auto-box'); if (box) box.dataset.key = t.dataset.autoUn; await unrecordAuto(ty, id); if (!box || t.dataset.thenClose) closeSheet(); else refreshAutoBox(); return; }
     if (t.dataset.move && can()) { const [id, d] = t.dataset.move.split('|'); moveStop(id, +d); return; }
     if (t.id === 'plan-add') { stopSheet(null, null); return; }
     if (t.id === 'bud-edit' || t.id === 'bud-edit2') { budgetSheet(); return; }
@@ -822,9 +852,9 @@ export function startApp(ctx) {
       }
       return;
     }
-    if (t.dataset.dd) { UI.diaryDate = iso(addD(parseD(UI.diaryDate), +t.dataset.dd)); render(); return; }
+    if (t.dataset.dd) { UI.diaryAuto = false; UI.diaryDate = iso(addD(parseD(UI.diaryDate), +t.dataset.dd)); render(); return; }
     if (t.id === 'diary-save') { saveDiary([]); return; }
-    if (t.dataset.editDiary) { UI.diaryDate = t.dataset.editDiary; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    if (t.dataset.editDiary) { UI.diaryAuto = false; UI.diaryDate = t.dataset.editDiary; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
     if (t.dataset.dorder) { UI.diaryOrder = t.dataset.dorder; render(); return; }
     if (t.dataset.viewPhoto) { openSheet('<img class="big-photo" src=\"' + esc(ctx.assets.src(t.dataset.viewPhoto)) + '" alt="写真"><button class="btn" type="button" data-close>閉じる</button>'); return; }
     if (t.dataset.delPhoto) {
@@ -854,7 +884,7 @@ export function startApp(ctx) {
       return;
     }
     if (t.id === 'hide-done') { UI.hideDone = t.checked; try { localStorage.setItem('tabicho-ui', JSON.stringify({ hideDone: UI.hideDone })); } catch (er) {} render(); return; }
-    if (t.id === 'diary-date' && t.value) { UI.diaryDate = t.value; render(); return; }
+    if (t.id === 'diary-date' && t.value) { UI.diaryAuto = false; UI.diaryDate = t.value; render(); return; }
     if (t.id === 'diary-photo' && t.files && t.files.length && S.assets) {
       const ids = []; toast('写真を送っています');
       for (const f of t.files) { try { const r = await S.assets.upload(f); ids.push(r.id); } catch (er) { toast('写真を保存できませんでした（20MBまで）'); } }
@@ -879,6 +909,9 @@ export function startApp(ctx) {
   // ---------- ルーティング ----------
   function route() { const h = (location.hash || '').slice(1); UI.view = VIEWS.some((v) => v.id === h) ? h : 'map'; closeSheet(); render(); window.scrollTo({ top: 0 }); }
   window.addEventListener('hashchange', route);
+  // アプリを開いたまま日付が変わったとき（翌朝に開き直したときなど）、今日に合わせて描き直す
+  let lastDay = iso(today());
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && iso(today()) !== lastDay) { lastDay = iso(today()); render(); } });
   window.addEventListener('resize', () => { if (UI.view === 'map') applyVB(); });
 
   // ---------- データ ----------
@@ -892,7 +925,7 @@ export function startApp(ctx) {
     db.collection('wishes').onSnapshot((s) => { const o = {}; s.docs.forEach((d) => { const v = d.data(); if (v && v.code) o[v.code] = { ...v, items: Array.isArray(v.items) ? v.items : [] }; }); S.wishPrefs = o; S.loaded.wishes = true; render(); });
     db.collection('wishdone').onSnapshot((s) => { const o = {}; s.docs.forEach((d) => { o[d.id] = d.data() || { done: true }; }); S.done = o; render(); });
     db.collection('bookings').onSnapshot((s) => { S.bookings = map(s); S.loaded.bookings = true; render(); });
-    db.collection('expenses').onSnapshot((s) => { S.expenses = map(s); S.loaded.expenses = true; render(); });
+    db.collection('expenses').onSnapshot((s) => { S.expenses = map(s); S.loaded.expenses = true; refreshAutoBox(); render(); });
     db.collection('diary').onSnapshot(async (s) => {
       const o = {}; s.docs.forEach((d) => { o[d.id] = d.data(); }); S.diary = o;
       const ids = Object.values(o).flatMap((d) => (d && Array.isArray(d.photos) ? d.photos : []));
