@@ -442,6 +442,8 @@ export function startApp(ctx) {
           const r = await S.db.collection('stops').add({ ...data, order }); sid = r.id;
         }
         closeSheet(); toast(posNote ? '保存しました。' + posNote : '保存しました');
+        // 予約の欄で支払い済みにした（または外した）ときも、状態を切り替えたときと同じように出費のことを聞く
+        if (data.booking !== (s ? s.booking || 'none' : 'none')) askAuto('stop', sid, data.booking, data.place + 'の宿代');
       } catch (er) { fail(er); }
     });
     if (s) {
@@ -507,8 +509,10 @@ export function startApp(ctx) {
       e.preventDefault(); if (!can()) return;
       const data = { title: $('#bf-title').value.trim(), kind: $('#bf-kind').value, status: $('#bf-status').value, stopId: $('#bf-stop').value, date: $('#bf-date').value || '', amount: Math.max(0, parseInt($('#bf-amount').value, 10) || 0), memo: $('#bf-memo').value.trim() };
       try {
-        if (id) await S.db.doc('bookings/' + id).update(data); else await S.db.collection('bookings').add({ ...data, order: Date.now() });
+        let bid = id;
+        if (id) await S.db.doc('bookings/' + id).update(data); else bid = (await S.db.collection('bookings').add({ ...data, order: Date.now() })).id;
         closeSheet(); toast('保存しました');
+        if (data.status !== (id ? b.status || 'none' : 'none')) askAuto('booking', bid, data.status, data.title);
       } catch (er) { fail(er); }
     });
     if (id) $('#bf-del').addEventListener('click', () => {
