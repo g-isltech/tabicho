@@ -216,3 +216,10 @@ body.no-tabs .tabs{display:none}
 #sf-pos{flex:1 1 100%}
 .wish > .grow{flex:1 1 180px}
 .wish > .grow + .pill{margin-left:auto}
+
+/* iPhone の Safari では、日付の入力欄が独自の幅を持ち、width:100% を無視してはみ出す。見た目をふつうの入力欄にそろえる */
+input[type="date"].i{-webkit-appearance:none;appearance:none;display:block;min-width:0;max-width:100%;width:100%;line-height:1.4}
+input[type="date"].i::-webkit-date-and-time-value{text-align:left;margin:0}
+input[type="date"].i::-webkit-datetime-edit{padding:0}
+.row > input[type="date"].i{width:auto;flex:1 1 140px}
+label.f{min-width:0}
