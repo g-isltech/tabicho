@@ -2,7 +2,7 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Store, scopedDb, newId } from './store';
 import { Photos } from './photos';
-import { exportZip, importZip, saveBlob } from './backup';
+import { exportZip, importZip, saveFile } from './backup';
 import { startApp } from './app.js';
 
 const PREFS = ['北海道', '青森', '岩手', '宮城', '秋田', '山形', '福島', '茨城', '栃木', '群馬', '埼玉', '千葉', '東京', '神奈川', '新潟', '富山', '石川', '福井', '山梨', '長野', '岐阜', '静岡', '愛知', '三重', '滋賀', '京都', '大阪', '兵庫', '奈良', '和歌山', '鳥取', '島根', '岡山', '広島', '山口', '徳島', '香川', '愛媛', '高知', '福岡', '佐賀', '長崎', '熊本', '大分', '宮崎', '鹿児島', '沖縄'];
@@ -47,15 +47,22 @@ function toast(msg: string): void {
   setTimeout(() => { r.innerHTML = ''; }, 2400);
 }
 
+// zip を作るのに時間がかかるので、作り終えてから「保存する」をもう一度押してもらう（共有シートはボタンを押した直後にしか開けないため）
 async function doExport(): Promise<void> {
-  try {
-    toast('書き出しています');
-    const blob = await exportZip(store);
-    saveBlob(blob, 'tabicho-' + todayIso().replace(/-/g, '') + '.zip');
+  let blob: Blob;
+  try { toast('書き出す準備をしています'); blob = await exportZip(store); }
+  catch (e) { toast('書き出せませんでした'); console.error(e); return; }
+  const name = 'tabicho-' + todayIso().replace(/-/g, '') + '.zip';
+  sheet('<h2>書き出す準備ができました</h2><p style="margin:0">' + esc(name) + '（' + (blob.size / 1024 / 1024).toFixed(1) + 'MB）</p>' +
+    '<p class="sub">iPhone では、開いた画面で「\"ファイル\"に保存」を選んでください。iCloud Drive などに置いておくと、機種変更のときも安心です。</p>' +
+    '<div class="row"><button class="btn primary grow" type="button" id="ex-save">保存する</button><button class="btn" type="button" data-close>やめる</button></div>');
+  $('#ex-save')!.addEventListener('click', async () => {
+    const r = await saveFile(blob, name);
+    if (r === 'cancelled') return;
     await store.setSetting('lastExport', Date.now());
-    toast('書き出しました。ファイルを安全な所に保存してください');
+    closeSheet(); toast('書き出しました');
     $('#export-banner')?.remove();
-  } catch (e) { toast('書き出せませんでした'); console.error(e); }
+  });
 }
 
 async function doImport(file: File): Promise<void> {

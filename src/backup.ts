@@ -41,6 +41,25 @@ export async function importZip(store: Store, file: Blob): Promise<ImportResult>
   return { docs, photos };
 }
 
+/**
+ * ファイルを端末に保存する。
+ * iPhone のホーム画面から開いたアプリでは、ふつうのダウンロードが動かないことがあるため、
+ * 共有シート（「ファイルに保存」を選べる）が使えるときはそちらを使う。
+ * 共有シートは、ボタンを押した直後に呼ぶ必要がある。
+ */
+export async function saveFile(blob: Blob, filename: string): Promise<'shared' | 'downloaded' | 'cancelled'> {
+  const file = new File([blob], filename, { type: blob.type || 'application/zip' });
+  const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+  // パソコンでは、ふつうのダウンロードの方が分かりやすいので、指で操作する端末のときだけ共有シートを使う
+  const touch = matchMedia('(pointer: coarse)').matches;
+  if (touch && nav.canShare && nav.share && nav.canShare({ files: [file] })) {
+    try { await nav.share({ files: [file], title: filename }); return 'shared'; }
+    catch (e) { if (e instanceof DOMException && e.name === 'AbortError') return 'cancelled'; }
+  }
+  saveBlob(blob, filename);
+  return 'downloaded';
+}
+
 export function saveBlob(blob: Blob, filename: string): void {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);

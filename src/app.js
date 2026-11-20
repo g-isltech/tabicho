@@ -169,7 +169,7 @@ export function startApp(ctx) {
       '<span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--ship)" stroke-width="3" stroke-dasharray="6 4"/></svg>船</span>' +
       '<span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--plane)" stroke-width="2.5" stroke-dasharray="2 4" stroke-linecap="round"/></svg>飛行機</span>' +
       '<span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/></svg>最後の泊まりから出発地へ戻る</span>' +
-      '<span><i class="lg" style="background:color-mix(in srgb,var(--road) 55%,var(--land))"></i>色が濃い県ほど「やりたい」を達成</span></div>' +
+      '<span><i class="lg" style="background:var(--road-soft);background:color-mix(in srgb,var(--road) 55%,var(--land))"></i>色が濃い県ほど「やりたい」を達成</span></div>' +
       '<p class="credit">地図: 地球地図日本（国土地理院）を加工</p></section>' +
       '<section class="card" id="mapsel">' + mapSel(sch, ti) + '</section>';
   }
@@ -186,7 +186,7 @@ export function startApp(ctx) {
   function initMap() {
     const svg = $('#mapsvg'); if (!svg) return;
     const gp = $('#g-pref');
-    if (UI.geo) gp.innerHTML = Object.keys(UI.geo).filter((k) => UI.geo[k]).map((k) => '<path data-code="' + k + '" d="' + UI.geo[k] + '" stroke="var(--line)" stroke-width="1" stroke-linejoin="round"/>').join('');
+    if (UI.geo) gp.innerHTML = Object.keys(UI.geo).filter((k) => UI.geo[k]).map((k) => '<path data-code="' + k + '" d="' + UI.geo[k] + '" fill="var(--land)" stroke="var(--line)" stroke-width="1" stroke-linejoin="round"/>').join('');
     applyVB();
     const ptrs = new Map(); let last = null, travel = 0;
     svg.addEventListener('pointerdown', (e) => { ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); last = null; travel = 0; UI.moved = false; });
@@ -242,11 +242,11 @@ export function startApp(ctx) {
     if (UI.geo && !gp.childElementCount) initGeoPaths();
     gp.querySelectorAll('path').forEach((p) => {
       const v = prefPct(p.dataset.code);
-      p.setAttribute('style', v ? 'fill:color-mix(in srgb,var(--road) ' + Math.round(8 + v * 55) + '%,var(--land))' : 'fill:var(--land)');
+      p.setAttribute('style', v ? 'fill:var(--road-soft);fill:color-mix(in srgb,var(--road) ' + Math.round(8 + v * 55) + '%,var(--land))' : 'fill:var(--land)');
     });
     updateRoute(sch); updatePins(sch, ti);
   }
-  function initGeoPaths() { $('#g-pref').innerHTML = Object.keys(UI.geo).filter((k) => UI.geo[k]).map((k) => '<path data-code="' + k + '" d="' + UI.geo[k] + '" stroke="var(--line)" stroke-width="1" stroke-linejoin="round"/>').join(''); }
+  function initGeoPaths() { $('#g-pref').innerHTML = Object.keys(UI.geo).filter((k) => UI.geo[k]).map((k) => '<path data-code="' + k + '" d="' + UI.geo[k] + '" fill="var(--land)" stroke="var(--line)" stroke-width="1" stroke-linejoin="round"/>').join(''); }
   function updateRoute(sch) {
     const g = $('#g-route'); if (!g) return; const u = unit();
     let h = '';
@@ -701,7 +701,7 @@ export function startApp(ctx) {
       '<button class="btn primary wish-add" id="wish-new"' + (can() ? '' : ' disabled') + '>＋ 追加</button></div>' +
       '<div class="pgrid" role="group" aria-label="都道府県で絞り込み">' + codes.map((c) => {
         const p = S.wishPrefs[c]; const n = p.items.length, d = p.items.filter((w) => S.done[w.id]).length, v = n ? d / n : 0;
-        return '<button class="ptile" data-pref="' + c + '" aria-pressed="' + (UI.wishPref === c) + '" style="background:color-mix(in srgb,var(--road) ' + Math.round(v * 60) + '%,var(--surface));' + (v > 0.55 ? 'color:var(--road-ink)' : '') + '">' + esc(p.pref) + '<small' + (v > 0.55 ? ' style="color:inherit"' : '') + '>' + d + '/' + n + '</small></button>';
+        return '<button class="ptile" data-pref="' + c + '" aria-pressed="' + (UI.wishPref === c) + '" style="background:' + (v > 0 ? 'var(--road-soft)' : 'var(--surface)') + ';background:color-mix(in srgb,var(--road) ' + Math.round(v * 60) + '%,var(--surface));' + (v > 0.55 ? 'color:var(--road-ink)' : '') + '">' + esc(p.pref) + '<small' + (v > 0.55 ? ' style="color:inherit"' : '') + '>' + d + '/' + n + '</small></button>';
       }).join('') + '</div>' +
       '<div class="row"><div class="chips" role="group" aria-label="種類">' + [['all', 'すべて'], ['see', '見る'], ['eat', '食べる']].map((x) => '<button class="chip" data-wk="' + x[0] + '" aria-pressed="' + (UI.wishKind === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' +
       '<label class="row" style="font-size:13px;font-weight:700;color:var(--muted);gap:6px;min-height:44px"><input type="checkbox" id="hide-done"' + (UI.hideDone ? ' checked' : '') + ' style="width:20px;height:20px">達成したものを隠す</label>' +

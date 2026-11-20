@@ -89,7 +89,7 @@ textarea.i{min-height:96px;resize:vertical;line-height:1.6}
 
 /* 地図 */
 .map-card{padding:0;overflow:hidden;position:relative}
-.map-box{position:relative;height:min(62vh,620px);background:var(--sea);touch-action:none}
+.map-box{position:relative;height:min(62vh,620px);height:min(62dvh,620px);background:var(--sea);touch-action:none}
 .map-box svg{width:100%;height:100%;display:block;user-select:none;-webkit-user-select:none}
 .map-tools{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:8px}
 .map-tools button{width:44px;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:20px;font-weight:700;display:grid;place-items:center}
@@ -168,11 +168,11 @@ textarea.i{min-height:96px;resize:vertical;line-height:1.6}
 .strip button{border:0;padding:0;background:none;flex-shrink:0}
 .strip img{width:96px;height:96px;object-fit:cover;border-radius:8px;display:block}
 .month-h{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;margin-top:6px}
-.big-photo{width:100%;max-height:70vh;object-fit:contain;border-radius:10px;background:var(--sunk)}
+.big-photo{width:100%;max-height:70vh;max-height:70dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}
 
 /* シート */
 .sheet-bg{position:fixed;inset:0;background:rgba(10,18,22,.45);z-index:40}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--surface);border-radius:18px 18px 0 0;max-height:88vh;overflow-y:auto;
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--surface);border-radius:18px 18px 0 0;max-height:88vh;max-height:88dvh;overflow-y:auto;overscroll-behavior:contain;
   padding-block:16px calc(20px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .sheet-in{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 .grab{width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
@@ -223,3 +223,9 @@ input[type="date"].i::-webkit-date-and-time-value{text-align:left;margin:0}
 input[type="date"].i::-webkit-datetime-edit{padding:0}
 .row > input[type="date"].i{width:auto;flex:1 1 140px}
 label.f{min-width:0}
+
+/* 長い英数字（URL や予約番号）でも折り返す */
+body{overflow-wrap:break-word}
+.d,.sub,.w,.n,p{overflow-wrap:anywhere}
+/* 古い iPhone（iOS 16.1 まで）は color-mix に対応していない。色を混ぜられないときも白く塗る */
+#g-pref path{fill:var(--land)}
