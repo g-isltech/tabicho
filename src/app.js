@@ -25,7 +25,10 @@ export function startApp(ctx) {
   }
   // 都道府県の並び（PREFS）の何番目からどの地方か
   const regionOfPref = (name) => { const i = PREFS.findIndex((p) => name && String(name).startsWith(p)); if (i < 0) return -1; return i === 0 ? 0 : i <= 6 ? 1 : i <= 13 ? 2 : i <= 22 ? 3 : i <= 29 ? 4 : i <= 34 ? 5 : i <= 38 ? 6 : 7; };
-  const LODG = { '車中泊': '#2B5F94', '安い宿': '#9A958B', '温泉旅館': '#C2581B', '船中泊': '#1F7470' };
+  const LODG = { '車中泊': '#2B5F94', 'テント泊': '#2F7A4A', '安い宿': '#9A958B', 'ホテル': '#6B4C9A', '温泉旅館': '#C2581B', '知人宅': '#8A5A12', '船中泊': '#1F7470', 'その他': '#555555' };
+  // 予約の画面で「車中泊・キャンプ」にまとめる泊まり方
+  const OUTDOOR = ['車中泊', 'テント泊'];
+  const MAX_NIGHTS = 60;
   const KIND = { B: '拠点', T: '途中泊', S: '船' };
   const BOOK = { none: '未予約', booked: '予約済み', paid: '支払い済み' };
   const BKIND = ['飛行機', '船', 'レンタカー', '駐車場', '見学・体験', '宿', 'その他'];
@@ -56,7 +59,7 @@ export function startApp(ctx) {
     stops: [], wishPrefs: {}, done: {}, bookings: [], expenses: [], diary: {},
     trip: { start: '' }, budget: null,
     loaded: { stops: false, wishes: false, bookings: false, expenses: false },
-    db: null, user: null, assets: null, me: null, live: false, names: {}
+    db: null, assets: null, me: '', live: false
   };
   const UI = { view: 'map', zone: 0, vb: { ...FULL }, sel: null, wishPref: null, wishKind: 'all', hideDone: false,
     bookFilter: 'all', expAll: false, diaryDate: null, geo: null };
@@ -96,27 +99,13 @@ export function startApp(ctx) {
     clearTimeout(toast._t); toast._t = setTimeout(() => { r.innerHTML = ''; }, 2200);
   }
   function fail(e) {
-    const c = e && e.code;
-    toast(c === 'quota_exceeded' ? '保存できる件数の上限です。古い記録を消してください' : c === 'revoked' ? '保存の権限がなくなりました' : '保存できませんでした。もう一度試してください');
+    const full = e && e.name === 'QuotaExceededError';
+    toast(full ? 'この端末の保存できる容量がいっぱいです。写真を減らすか、書き出してから古い旅を消してください' : '保存できませんでした。もう一度試してください');
   }
   const can = () => !!S.db;
-  // 達成した人の名前は、表示のたびに保存済みの id から引く（名前そのものは保存しない）
-  async function ensureNames(ids) {
-    if (!S.user) return;
-    const need = [...new Set(ids.filter((x) => x && S.names[x] === undefined))]; if (!need.length) return;
-    need.forEach((x) => { S.names[x] = ''; });
-    try { const ps = await S.user.profiles(need); need.forEach((x) => { S.names[x] = (ps && ps[x] && ps[x].name) || ''; }); render(); } catch (e) {}
-  }
   function doneBy(v) {
     if (!v || !v.at) return '';
-    const d = new Date(v.at); const who = v.by ? S.names[v.by] : '';
-    return '<br><span class="done-by">達成 ' + md(d) + (who ? '・' + esc(who) : '') + '</span>';
-  }
-  async function nameOf(id) {
-    if (!id || !S.user) return '';
-    if (S.names[id] !== undefined) return S.names[id];
-    try { const ps = await S.user.profiles([id]); S.names[id] = (ps && ps[id] && ps[id].name) || ''; } catch (e) { S.names[id] = ''; }
-    return S.names[id];
+    return '<br><span class="done-by">達成 ' + md(new Date(v.at)) + '</span>';
   }
 
   // ---------- 描画の司令塔 ----------
@@ -145,7 +134,7 @@ export function startApp(ctx) {
     const fn = { map: vMap, plan: vPlan, book: vBook, money: vMoney, wish: vWish, diary: vDiary }[UI.view];
     const keep = UI.view === 'map' && $('#mapsvg');
     if (keep) { updateMap(sch, ti); const ms = $('#mapsel'); if (ms) ms.innerHTML = mapSel(sch, ti); return; }
-    $('#view').innerHTML = (S.db === false ? '<p class="banner">この画面では保存の機能が使えません。編集するには、共有された人が自分のアカウントで開いてください</p>' : '') + fn(sch, ti);
+    $('#view').innerHTML = fn(sch, ti);
     if (UI.view === 'map') { initMap(); updateMap(sch, ti); }
   }
 
@@ -179,7 +168,7 @@ export function startApp(ctx) {
     return '<div class="next"><div class="badge-n" style="background:' + c + '">' + (s.idx + 1) + '</div><div style="min-width:0;display:flex;flex-direction:column;gap:6px">' +
       '<p class="sub">' + esc(label) + '・' + mdw(s.start) + '〜' + mdw(s.end) + '</p>' +
       '<div class="row"><h2>' + esc(s.place) + '</h2><span class="pill' + (s.kind === 'B' ? ' base' : '') + '">' + (KIND[s.kind] || '') + '</span><span class="pill ' + esc(s.booking || 'none') + '">' + (BOOK[s.booking] || '未予約') + '</span></div>' +
-      '<p class="sub">' + esc(s.pref) + '・' + s.nights + '泊・' + esc(s.lodging) + (s.lodgingName ? '（' + esc(s.lodgingName) + '）' : '') + '</p>' +
+      '<p class="sub">' + esc(s.pref) + '・' + (+s.nights || 0) + '泊・' + esc(s.lodging) + (s.lodgingName ? '（' + esc(s.lodgingName) + '）' : '') + '</p>' +
       (s.what ? '<p style="margin:0;font-size:14px">' + esc(s.what) + '</p>' : '') +
       '<div class="row"><button class="btn small" data-edit-stop="' + esc(s.id) + '">この泊まりを編集</button><a class="btn small" href="#plan">行程で見る</a></div></div></div>';
   }
@@ -305,7 +294,7 @@ export function startApp(ctx) {
       list.forEach((s) => {
         const now = ti.cur && ti.cur.id === s.id;
         const first = s.idx === 0, last = s.idx === sch.length - 1;
-        h += '<div class="stop-row"><button class="stop' + (now ? ' now' : '') + '" data-edit-stop="' + esc(s.id) + '"><div class="d"><b>' + md(s.start) + '</b>' + WD[s.start.getDay()] + '曜<br>' + s.nights + '泊</div>' +
+        h += '<div class="stop-row"><button class="stop' + (now ? ' now' : '') + '" data-edit-stop="' + esc(s.id) + '"><div class="d"><b>' + md(s.start) + '</b>' + WD[s.start.getDay()] + '曜<br>' + (+s.nights || 0) + '泊</div>' +
           '<div style="min-width:0"><div class="t"><strong>' + esc(s.place) + '</strong><span class="sub">' + esc(s.pref) + '</span><span class="pill' + (s.kind === 'B' ? ' base' : '') + '">' + (KIND[s.kind] || '') + '</span>' +
           '<span class="pill ' + esc(s.booking || 'none') + '">' + (BOOK[s.booking] || '未予約') + '</span>' +
           '<span class="nights" aria-label="' + esc(s.lodging) + '">' + Array.from({ length: Math.min(+s.nights || 0, 10) }, () => '<i style="background:' + (LODG[s.lodging] || '#999') + '"></i>').join('') + '</span></div>' +
@@ -393,9 +382,9 @@ export function startApp(ctx) {
       '<div class="f">地図上の位置<div class="row"><span class="grow num" id="sf-pos" style="font-size:13px;color:var(--muted)">' + (s && typeof s.lat === 'number' ? '北緯' + pos.lat.toFixed(2) + '・東経' + pos.lng.toFixed(2) : '保存するときに、場所の名前と都道府県から自動で決めます') + '</span>' + '<button class="btn small" type="button" id="sf-regeo">名前から探し直す</button><button class="btn small" type="button" id="sf-pick">地図で位置を決める</button></div><div id="sf-map"></div></div>' +
       '<div class="grid2"><label class="f">ここへの移動<select class="i" id="sf-arrive">' + [['car', '車'], ['ship', '船'], ['plane', '飛行機']].map((x) => '<option value="' + x[0] + '"' + ((base.arrive || 'car') === x[0] ? ' selected' : '') + '>' + x[1] + '</option>').join('') + '</select></label>' +
       '<label class="f">地方<select class="i" id="sf-region">' + REG.map((r, i) => '<option value="' + i + '"' + (+base.region === i ? ' selected' : '') + '>' + esc(r[0]) + '</option>').join('') + '</select></label></div>' +
-      '<div class="grid2"><label class="f">泊数<input class="i num" id="sf-nights" type="number" inputmode="numeric" min="0" max="14" value="' + (+base.nights || 0) + '"></label>' +
+      '<div class="grid2"><label class="f">泊数<input class="i num" id="sf-nights" type="number" inputmode="numeric" min="0" max="' + MAX_NIGHTS + '" value="' + (+base.nights || 0) + '"></label>' +
       '<label class="f">種類<select class="i" id="sf-kind">' + Object.keys(KIND).map((k) => '<option value="' + k + '"' + (base.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>').join('') + '</select></label></div>' +
-      '<div class="grid2"><label class="f">泊まり方<select class="i" id="sf-lodging">' + Object.keys(LODG).map((k) => '<option' + (base.lodging === k ? ' selected' : '') + '>' + k + '</option>').join('') + '</select></label>' +
+      '<div class="grid2"><label class="f">泊まり方<select class="i" id="sf-lodging">' + Object.keys(LODG).map((k) => '<option' + (base.lodging === k ? ' selected' : '') + '>' + k + '</option>').join('') + (base.lodging && !LODG[base.lodging] ? '<option selected>' + esc(base.lodging) + '</option>' : '') + '</select></label>' +
       '<label class="f">予約<select class="i" id="sf-booking">' + Object.keys(BOOK).map((k) => '<option value="' + k + '"' + ((base.booking || 'none') === k ? ' selected' : '') + '>' + BOOK[k] + '</option>').join('') + '</select></label></div>' +
       '<div class="grid2"><label class="f">宿・キャンプ場の名前<input class="i" id="sf-lname" value="' + esc(base.lodgingName) + '"></label><label class="f">宿代（合計・円）<input class="i num" id="sf-cost" type="number" inputmode="numeric" min="0" value="' + (+base.cost || '') + '"></label></div>' +
       (s ? '<div id="auto-box">' + autoBox('stop', s) + '</div>' : '<p class="sub">保存したあと、支払い済みにして宿代を入れると、お金の出費に記録できます</p>') +
@@ -429,7 +418,7 @@ export function startApp(ctx) {
     $('#sf-pref').addEventListener('change', () => { const rg = regionOfPref($('#sf-pref').value); if (rg >= 0) $('#sf-region').value = String(rg); });
     $('#stop-form').addEventListener('submit', async (e) => {
       e.preventDefault(); if (!can()) return;
-      const data = { place: $('#sf-place').value.trim(), pref: $('#sf-pref').value.trim(), nights: Math.max(0, Math.min(14, parseInt($('#sf-nights').value, 10) || 0)),
+      const data = { place: $('#sf-place').value.trim(), pref: $('#sf-pref').value.trim(), nights: Math.max(0, Math.min(MAX_NIGHTS, parseInt($('#sf-nights').value, 10) || 0)),
         kind: $('#sf-kind').value, lodging: $('#sf-lodging').value, booking: $('#sf-booking').value, lodgingName: $('#sf-lname').value.trim(),
         cost: Math.max(0, parseInt($('#sf-cost').value, 10) || 0), what: $('#sf-what').value.trim(), memo: $('#sf-memo').value.trim(),
         arrive: $('#sf-arrive').value, region: parseInt($('#sf-region').value, 10) || 0 };
@@ -458,7 +447,7 @@ export function startApp(ctx) {
     if (s) {
       $('#sf-add').addEventListener('click', () => stopSheet(null, s));
       $('#sf-del').addEventListener('click', () => {
-        $('#sf-confirm').innerHTML = '<div class="banner row"><span class="grow">「' + esc(s.place) + '」を行程から消します。後ろの日付が' + s.nights + '日早まります' + (S.expenses.some((x) => x.id === 'auto-s-' + s.id) ? '。出費に記録した宿代は残ります。不要なら「出費から外す」を先に押してください' : '') + '</span><button class="btn small danger" type="button" id="sf-del2">消す</button></div>';
+        $('#sf-confirm').innerHTML = '<div class="banner row"><span class="grow">「' + esc(s.place) + '」を行程から消します。後ろの日付が' + (+s.nights || 0) + '日早まります' + (S.expenses.some((x) => x.id === 'auto-s-' + s.id) ? '。出費に記録した宿代は残ります。不要なら「出費から外す」を先に押してください' : '') + '</span><button class="btn small danger" type="button" id="sf-del2">消す</button></div>';
         $('#sf-del2').addEventListener('click', async () => { try { await S.db.doc('stops/' + s.id).delete(); closeSheet(); UI.sel = null; toast('消しました'); } catch (er) { fail(er); } });
       });
     }
@@ -466,8 +455,8 @@ export function startApp(ctx) {
 
   // ---------- 予約 ----------
   function vBook(sch) {
-    const stays = sch.filter((s) => s.kind !== 'S' && s.lodging !== '車中泊');
-    const camps = sch.filter((s) => s.lodging === '車中泊');
+    const stays = sch.filter((s) => s.kind !== 'S' && !OUTDOOR.includes(s.lodging));
+    const camps = sch.filter((s) => OUTDOOR.includes(s.lodging));
     const when = (b) => { if (b.date) return parseD(b.date).getTime(); const s = sch.find((x) => x.id === b.stopId); return s ? s.start.getTime() : 0; };
     const others = S.bookings.slice().sort((a, b) => (when(a) - when(b)) || ((a.order || 0) - (b.order || 0)));
     const all = [...stays.map((s) => s.booking || 'none'), ...others.map((b) => b.status || 'none')];
@@ -490,11 +479,11 @@ export function startApp(ctx) {
     const listStay = (title, arr) => {
       const l = arr.filter((s) => pass(s.booking));
       return '<section class="card"><div class="sec-h"><h3>' + title + '</h3><span class="sub num">' + arr.length + 'か所</span></div>' +
-        (l.length ? l.map((s) => '<div class="wish" style="align-items:center"><div class="grow"><div class="n">' + md(s.start) + '〜 ' + esc(s.place) + '（' + s.nights + '泊）</div><div class="d">' + esc(s.lodging) + (s.lodgingName ? '・' + esc(s.lodgingName) : '・宿の名前は未入力') + (s.cost ? '・' + yen(s.cost) : '') + '</div></div>' +
+        (l.length ? l.map((s) => '<div class="wish" style="align-items:center"><div class="grow"><div class="n">' + md(s.start) + '〜 ' + esc(s.place) + '（' + (+s.nights || 0) + '泊）</div><div class="d">' + esc(s.lodging) + (s.lodgingName ? '・' + esc(s.lodgingName) : '・宿の名前は未入力') + (s.cost ? '・' + yen(s.cost) : '') + '</div></div>' +
           '<button class="pill ' + esc(s.booking || 'none') + '" style="border:0;min-height:36px;padding:0 10px" data-cycle-s="' + esc(s.id) + '" aria-label="' + esc(s.place) + 'の予約の状態を切り替え">' + (BOOK[s.booking] || '未予約') + '</button>' +
           '<button class="btn small" data-edit-stop="' + esc(s.id) + '" aria-label="' + esc(s.place) + 'を編集">編集</button></div>').join('') : '<div class="empty" style="margin-top:10px">該当するものはありません</div>') + '</section>';
     };
-    h += listStay('宿', stays) + listStay('車中泊の場所（RVパーク・キャンプ場）', camps);
+    h += listStay('宿', stays) + listStay('車中泊・テント泊の場所（RVパーク・キャンプ場）', camps);
     return h;
   }
   const nextStatus = (s) => ({ none: 'booked', booked: 'paid', paid: 'none' }[s || 'none']);
@@ -656,9 +645,11 @@ export function startApp(ctx) {
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => totalB * f);
     let svg = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="予定と実際の出費の累計">';
     ticks.forEach((t) => { svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(t) + '" y2="' + y(t) + '" stroke="var(--line)" stroke-width="1"/><text x="' + (L - 6) + '" y="' + (y(t) + 4) + '" text-anchor="end" font-size="11" fill="var(--muted)" font-family="Inter,sans-serif">' + Math.round(t / 10000) + '万</text>'; });
-    for (let m = 0; m < 7; m++) {
+    // 月の区切り。旅が長いときは、線が混み合わないように間引く（多くても12本）
+    const months = Math.ceil(days / 28) + 1, stepM = Math.max(1, Math.ceil(months / 12));
+    for (let m = 0; m <= months; m++) {
       const d0 = new Date(ti.start.getFullYear(), ti.start.getMonth() + m, 1); const k = dayDiff(ti.start, d0);
-      if (k > 0 && k < days) svg += '<line x1="' + x(k) + '" x2="' + x(k) + '" y1="' + T + '" y2="' + (H - B) + '" stroke="var(--line)" stroke-dasharray="3 3"/><text x="' + (x(k) + 3) + '" y="' + (H - 10) + '" font-size="11" fill="var(--muted)">' + (d0.getMonth() + 1) + '月</text>';
+      if (k > 0 && k < days && d0.getMonth() % stepM === 0) svg += '<line x1="' + x(k) + '" x2="' + x(k) + '" y1="' + T + '" y2="' + (H - B) + '" stroke="var(--line)" stroke-dasharray="3 3"/><text x="' + (x(k) + 3) + '" y="' + (H - 10) + '" font-size="11" fill="var(--muted)">' + (d0.getMonth() + 1) + '月</text>';
     }
     svg += '<line x1="' + x(0) + '" y1="' + y(0) + '" x2="' + x(days) + '" y2="' + y(totalB) + '" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 5"/>';
     if (pts.length > 1) {
@@ -701,7 +692,7 @@ export function startApp(ctx) {
       '<button class="btn primary wish-add" id="wish-new"' + (can() ? '' : ' disabled') + '>＋ 追加</button></div>' +
       '<div class="pgrid" role="group" aria-label="都道府県で絞り込み">' + codes.map((c) => {
         const p = S.wishPrefs[c]; const n = p.items.length, d = p.items.filter((w) => S.done[w.id]).length, v = n ? d / n : 0;
-        return '<button class="ptile" data-pref="' + c + '" aria-pressed="' + (UI.wishPref === c) + '" style="background:' + (v > 0 ? 'var(--road-soft)' : 'var(--surface)') + ';background:color-mix(in srgb,var(--road) ' + Math.round(v * 60) + '%,var(--surface));' + (v > 0.55 ? 'color:var(--road-ink)' : '') + '">' + esc(p.pref) + '<small' + (v > 0.55 ? ' style="color:inherit"' : '') + '>' + d + '/' + n + '</small></button>';
+        return '<button class="ptile" data-pref="' + esc(c) + '" aria-pressed="' + (UI.wishPref === c) + '" style="background:' + (v > 0 ? 'var(--road-soft)' : 'var(--surface)') + ';background:color-mix(in srgb,var(--road) ' + Math.round(v * 60) + '%,var(--surface));' + (v > 0.55 ? 'color:var(--road-ink)' : '') + '">' + esc(p.pref) + '<small' + (v > 0.55 ? ' style="color:inherit"' : '') + '>' + d + '/' + n + '</small></button>';
       }).join('') + '</div>' +
       '<div class="row"><div class="chips" role="group" aria-label="種類">' + [['all', 'すべて'], ['see', '見る'], ['eat', '食べる']].map((x) => '<button class="chip" data-wk="' + x[0] + '" aria-pressed="' + (UI.wishKind === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' +
       '<label class="row" style="font-size:13px;font-weight:700;color:var(--muted);gap:6px;min-height:44px"><input type="checkbox" id="hide-done"' + (UI.hideDone ? ' checked' : '') + ' style="width:20px;height:20px">達成したものを隠す</label>' +
@@ -726,7 +717,7 @@ export function startApp(ctx) {
     openSheet('<h2>' + (w ? 'やりたいことを直す' : 'やりたいことを追加') + '</h2><form id="wish-form" style="display:flex;flex-direction:column;gap:12px">' +
       '<label class="f">名前<input class="i" id="wf-name" required value="' + esc(w ? w.n : '') + '" placeholder="例: 函館の夜景"></label>' +
       '<label class="f">くわしく（なくてもよい）<input class="i" id="wf-d" value="' + esc(w ? w.d : '') + '" placeholder="例: 函館山から見る"></label>' +
-      '<div class="grid2"><label class="f">都道府県<select class="i" id="wf-pref" required><option value="">選んでください</option>' + codes.map((c) => '<option value="' + c + '"' + (c === cur ? ' selected' : '') + '>' + esc(S.wishPrefs[c].pref) + '</option>').join('') + '</select></label>' +
+      '<div class="grid2"><label class="f">都道府県<select class="i" id="wf-pref" required><option value="">選んでください</option>' + codes.map((c) => '<option value="' + esc(c) + '"' + (c === cur ? ' selected' : '') + '>' + esc(S.wishPrefs[c].pref) + '</option>').join('') + '</select></label>' +
       '<label class="f">種類<select class="i" id="wf-kind"><option value="see"' + (w && w.k === 'eat' ? '' : ' selected') + '>見る</option><option value="eat"' + (w && w.k === 'eat' ? ' selected' : '') + '>食べる</option></select></label></div>' +
       '<div class="row"><button class="btn primary grow" type="submit"' + (can() ? '' : ' disabled') + '>' + (w ? '保存' : '追加') + '</button><button class="btn" type="button" data-close>閉じる</button></div></form>');
     $('#wish-form').addEventListener('submit', async (e) => {
@@ -770,7 +761,7 @@ export function startApp(ctx) {
       '<div class="row"><button class="btn primary grow" id="diary-save"' + (can() ? '' : ' disabled') + '>保存</button>' +
       (S.assets ? '<label class="btn" for="diary-photo">写真を追加</label><input type="file" id="diary-photo" accept="image/*" multiple hidden>' : '') + '</div>' +
       (exists && can() ? '<div class="row"><span class="grow"></span><button class="btn small danger" type="button" data-del-diary="' + esc(k) + '">この日の日記を消す</button></div><div id="diary-confirm"></div>' : '') +
-      (S.assets ? '' : '<p class="sub">写真の追加は、この画面では使えません</p>') + '</section>';
+      '</section>';
     const keys = Object.keys(S.diary).filter((x) => diaryHas(S.diary[x])).sort();
     if (UI.diaryOrder !== 'old') keys.reverse();
     h += '<section style="display:flex;flex-direction:column;gap:10px"><div class="sec-h"><h2>これまでの日記</h2><span class="sub num">' + keys.length + '日分</span></div>' +
@@ -831,12 +822,6 @@ export function startApp(ctx) {
     if (t.id === 'plan-add') { stopSheet(null, null); return; }
     if (t.id === 'bud-edit' || t.id === 'bud-edit2') { budgetSheet(); return; }
     if (t.dataset.cat) { document.querySelectorAll('#ex-cats [data-cat]').forEach((b) => { const on = b === t; b.setAttribute('aria-pressed', String(on)); b.setAttribute('aria-checked', String(on)); }); return; }
-    if (t.dataset.delEx) {
-      const id = t.dataset.delEx;
-      if (t.dataset.armed) { try { await S.db.doc('expenses/' + id).delete(); toast('消しました'); } catch (er) { fail(er); } }
-      else { t.dataset.armed = '1'; t.textContent = '消す'; t.classList.add('danger'); setTimeout(() => { if (t.isConnected) { delete t.dataset.armed; t.textContent = '×'; t.classList.remove('danger'); } }, 3000); }
-      return;
-    }
     if (t.id === 'ex-more') { UI.expAll = !UI.expAll; render(); return; }
     if (t.dataset.pref !== undefined) { UI.wishPref = t.dataset.pref || null; render(); window.scrollTo({ top: 0 }); return; }
     if (t.dataset.wk) { UI.wishKind = t.dataset.wk; render(); return; }
@@ -886,8 +871,8 @@ export function startApp(ctx) {
     if (t.id === 'hide-done') { UI.hideDone = t.checked; try { localStorage.setItem('tabicho-ui', JSON.stringify({ hideDone: UI.hideDone })); } catch (er) {} render(); return; }
     if (t.id === 'diary-date' && t.value) { UI.diaryAuto = false; UI.diaryDate = t.value; render(); return; }
     if (t.id === 'diary-photo' && t.files && t.files.length && S.assets) {
-      const ids = []; toast('写真を送っています');
-      for (const f of t.files) { try { const r = await S.assets.upload(f); ids.push(r.id); } catch (er) { toast('写真を保存できませんでした（20MBまで）'); } }
+      const ids = []; toast('写真を縮めて保存しています');
+      for (const f of t.files) { try { const r = await S.assets.upload(f); ids.push(r.id); } catch (er) { toast('写真を保存できませんでした。写真の形式が対応していないか、容量がいっぱいです'); } }
       if (ids.length) saveDiary(ids);
     }
   });
@@ -897,12 +882,6 @@ export function startApp(ctx) {
       const amt = parseInt($('#ex-amt').value, 10); if (!amt || amt < 0) { toast('金額を入れてください'); return; }
       const cat = ($('#ex-cats [aria-pressed="true"]') || {}).dataset?.cat || '食費';
       try { await S.db.collection('expenses').add({ amount: amt, cat, date: $('#ex-date').value || iso(today()), memo: $('#ex-memo').value.trim(), by: S.me || '', at: Date.now() }); $('#ex-amt').value = ''; $('#ex-memo').value = ''; toast(yen(amt) + 'を記録しました'); } catch (er) { fail(er); }
-    }
-    if (e.target.id === 'wish-add') {
-      e.preventDefault(); if (!can() || !UI.wishPref) return;
-      const p = S.wishPrefs[UI.wishPref]; const name = $('#wa-name').value.trim(); if (!name) return;
-      const items = p.items.concat([{ id: 'w' + UI.wishPref + '-u' + Date.now().toString(36), k: $('#wa-kind').value, n: name, d: '' }]);
-      try { await S.db.doc('wishes/p' + UI.wishPref).update({ items }); toast('追加しました'); } catch (er) { fail(er); }
     }
   });
 
@@ -919,13 +898,22 @@ export function startApp(ctx) {
   route();
   (() => {
     const db = ctx.db;
-    S.db = db; S.user = null; S.me = ''; S.assets = ctx.assets;
+    S.db = db; S.assets = ctx.assets;
     const map = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    db.collection('stops').onSnapshot((s) => { S.stops = map(s).sort((a, b) => (a.order || 0) - (b.order || 0)); S.loaded.stops = true; S.live = true; render(); });
-    db.collection('wishes').onSnapshot((s) => { const o = {}; s.docs.forEach((d) => { const v = d.data(); if (v && v.code) o[v.code] = { ...v, items: Array.isArray(v.items) ? v.items : [] }; }); S.wishPrefs = o; S.loaded.wishes = true; render(); });
+    // 読み込んだデータの形をそろえる。書き出したファイルや、あとで共有する相手のデータは、形が崩れていることがあるため
+    const num = (v) => (Number.isFinite(+v) ? +v : 0);
+    const str = (v) => (v == null ? '' : String(v));
+    const coord = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const normStop = (o) => ({ ...o, place: str(o.place), pref: str(o.pref), lodging: str(o.lodging), lodgingName: str(o.lodgingName), what: str(o.what), memo: str(o.memo),
+      nights: Math.max(0, Math.min(MAX_NIGHTS, Math.floor(num(o.nights)))), region: Math.max(0, Math.min(REG.length - 1, Math.floor(num(o.region)))),
+      order: num(o.order), cost: Math.max(0, num(o.cost)), ...(coord(o.lat) !== undefined && coord(o.lng) !== undefined ? { lat: o.lat, lng: o.lng } : { lat: undefined, lng: undefined }),
+      kind: KIND[o.kind] ? o.kind : 'T', booking: BOOK[o.booking] ? o.booking : 'none', arrive: ['car', 'ship', 'plane'].includes(o.arrive) ? o.arrive : 'car' });
+    const normMoney = (o) => ({ ...o, amount: Math.max(0, num(o.amount)), date: /^\d{4}-\d{2}-\d{2}$/.test(str(o.date)) ? o.date : '' });
+    db.collection('stops').onSnapshot((s) => { S.stops = map(s).map(normStop).sort((a, b) => (a.order || 0) - (b.order || 0)); S.loaded.stops = true; S.live = true; render(); });
+    db.collection('wishes').onSnapshot((s) => { const o = {}; s.docs.forEach((d) => { const v = d.data(); if (v && /^\d{2}$/.test(str(v.code))) o[v.code] = { ...v, pref: str(v.pref), items: Array.isArray(v.items) ? v.items.filter((w) => w && typeof w.id === 'string').map((w) => ({ ...w, n: str(w.n), d: str(w.d), k: w.k === 'eat' ? 'eat' : 'see' })) : [] }; }); S.wishPrefs = o; S.loaded.wishes = true; render(); });
     db.collection('wishdone').onSnapshot((s) => { const o = {}; s.docs.forEach((d) => { o[d.id] = d.data() || { done: true }; }); S.done = o; render(); });
-    db.collection('bookings').onSnapshot((s) => { S.bookings = map(s); S.loaded.bookings = true; render(); });
-    db.collection('expenses').onSnapshot((s) => { S.expenses = map(s); S.loaded.expenses = true; refreshAutoBox(); render(); });
+    db.collection('bookings').onSnapshot((s) => { S.bookings = map(s).map(normMoney).map((b) => ({ ...b, title: str(b.title), kind: str(b.kind), memo: str(b.memo), stopId: str(b.stopId), status: BOOK[b.status] ? b.status : 'none' })); S.loaded.bookings = true; render(); });
+    db.collection('expenses').onSnapshot((s) => { S.expenses = map(s).map(normMoney).map((e) => ({ ...e, date: e.date || iso(today()), cat: str(e.cat), memo: str(e.memo) })); S.loaded.expenses = true; refreshAutoBox(); render(); });
     db.collection('diary').onSnapshot(async (s) => {
       const o = {}; s.docs.forEach((d) => { o[d.id] = d.data(); }); S.diary = o;
       const ids = Object.values(o).flatMap((d) => (d && Array.isArray(d.photos) ? d.photos : []));
