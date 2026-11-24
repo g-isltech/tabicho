@@ -48,18 +48,21 @@ function toast(msg: string): void {
 }
 
 // zip を作るのに時間がかかるので、作り終えてから「保存する」をもう一度押してもらう（共有シートはボタンを押した直後にしか開けないため）
-async function doExport(): Promise<void> {
+// tripId を渡すとその旅だけ、渡さないとすべての旅を書き出す
+async function doExport(tripId?: string): Promise<void> {
   let blob: Blob;
-  try { toast('書き出す準備をしています'); blob = await exportZip(store); }
+  try { toast('書き出す準備をしています'); blob = await exportZip(store, tripId); }
   catch (e) { toast('書き出せませんでした'); console.error(e); return; }
-  const name = 'tabicho-' + todayIso().replace(/-/g, '') + '.zip';
-  sheet('<h2>書き出す準備ができました</h2><p style="margin:0">' + esc(name) + '（' + (blob.size / 1024 / 1024).toFixed(1) + 'MB）</p>' +
+  const tripName = tripId ? String(store.read('trips/' + tripId)?.name || '旅') : '';
+  // ファイル名に日本語を使うと、ブラウザによっては名前が消えるので英数字にする（旅の名前はファイルの中に入っている）
+  const name = 'tabicho-' + (tripId ? 'trip' : 'all') + '-' + todayIso().replace(/-/g, '') + '.zip';
+  sheet('<h2>書き出す準備ができました</h2><p style="margin:0">' + (tripId ? '「' + esc(tripName) + '」だけ' : 'すべての旅') + '・' + esc(name) + '（' + (blob.size / 1024 / 1024).toFixed(1) + 'MB）</p>' +
     '<p class="sub">iPhone では、開いた画面で「\"ファイル\"に保存」を選んでください。iCloud Drive などに置いておくと、機種変更のときも安心です。</p>' +
     '<div class="row"><button class="btn primary grow" type="button" id="ex-save">保存する</button><button class="btn" type="button" data-close>やめる</button></div>');
   $('#ex-save')!.addEventListener('click', async () => {
     const r = await saveFile(blob, name);
     if (r === 'cancelled') return;
-    await store.setSetting('lastExport', Date.now());
+    if (!tripId) await store.setSetting('lastExport', Date.now());
     closeSheet(); toast('書き出しました');
     $('#export-banner')?.remove();
   });
@@ -76,6 +79,15 @@ async function doImport(file: File): Promise<void> {
   } catch (e) { toast(e instanceof Error ? e.message : '読み込めませんでした'); }
 }
 
+// サンプルの旅を読み込む（アプリと一緒に置いてある zip を使う）
+async function loadSample(): Promise<void> {
+  try {
+    const r = await fetch(import.meta.env.BASE_URL + 'sample-trip.zip');
+    if (!r.ok) throw new Error('サンプルを取り出せませんでした');
+    await doImport(new File([await r.blob()], 'tabicho-sample.zip', { type: 'application/zip' }));
+  } catch (e) { toast(e instanceof Error ? e.message : 'サンプルを取り出せませんでした'); }
+}
+
 // ---------- はじめての画面 ----------
 function onboarding(): void {
   document.body.classList.add('no-tabs');
@@ -87,7 +99,9 @@ function onboarding(): void {
     '<label class="f">旅の名前<input class="i" id="ob-name" required placeholder="例: 日本一周 2027" value="日本一周"></label>' +
     '<label class="f">出発日<input class="i" id="ob-start" type="date" required value="' + todayIso() + '"></label>' +
     '<button class="btn primary" type="submit">旅を作る</button></form>' +
-    '<div class="setting-row"><span class="sub">前に書き出したファイルがあるとき</span><label class="btn" for="ob-file">ファイルから読み込む</label><input type="file" id="ob-file" accept=".zip,application/zip" hidden></div>' +
+    '<div class="setting-row"><span class="grow">まずは使い方を見てみたいとき<br><span class="sub">北海道を11泊でめぐる、架空の旅が入ります</span></span><button class="btn" type="button" id="ob-sample">サンプルの旅で試す</button></div>' +
+    '<p class="sub" style="margin:0">サンプルのファイルは <a href="' + import.meta.env.BASE_URL + 'sample-trip.zip" download="tabicho-sample.zip">ここからダウンロード</a> できます。書き出したファイルの形の見本にもなります。</p>' +
+    '<div class="setting-row"><span class="sub">前に書き出したファイルや、一緒に行く人からもらったファイルがあるとき</span><label class="btn" for="ob-file">ファイルから読み込む</label><input type="file" id="ob-file" accept=".zip,application/zip" hidden></div>' +
     '<p class="sub">スマホでは、ブラウザの「ホーム画面に追加」をしてから使ってください。追加しないと、しばらく使わないうちにデータが消えることがあります。</p></section>';
   $('#ob-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -97,6 +111,7 @@ function onboarding(): void {
     await store.setSetting('currentTrip', tid);
     location.hash = '#plan'; location.reload();
   });
+  $('#ob-sample')!.addEventListener('click', loadSample);
   $('#ob-file')!.addEventListener('change', (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) doImport(f); });
 }
 
@@ -111,8 +126,10 @@ async function settings(current: Trip): Promise<void> {
     '<form id="st-rename" class="row"><input class="i grow" id="st-name" value="' + esc(current.name) + '" aria-label="表示中の旅の名前"><button class="btn" type="submit">名前を変える</button></form>' +
     '<form id="st-new" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"><input class="i" id="st-newname" placeholder="新しい旅の名前" required aria-label="新しい旅の名前"><div class="row"><input class="i grow" id="st-newstart" type="date" value="' + todayIso() + '" aria-label="新しい旅の出発日"><button class="btn" type="submit">新しい旅を作る</button></div></form></section>' +
     '<section style="display:flex;flex-direction:column;gap:4px"><h3>書き出しと読み込み</h3>' +
-    '<div class="setting-row"><span class="grow">すべての旅と写真を zip にまとめて保存します<br><span class="sub">最後に書き出した日: ' + (last ? new Date(last).toLocaleDateString('ja-JP') : 'まだありません') + '</span></span><button class="btn primary" type="button" id="st-export">書き出す</button></div>' +
-    '<div class="setting-row"><span class="grow">書き出したファイルを読み込みます。同じデータは新しい方を残します</span><label class="btn" for="st-file">読み込む</label><input type="file" id="st-file" accept=".zip,application/zip" hidden></div></section>' +
+    '<div class="setting-row"><span class="grow">表示中の旅「' + esc(current.name) + '」だけを書き出します<br><span class="sub">一緒に行く人に渡すときに使います。渡された人は「読み込む」で開けます</span></span><button class="btn primary" type="button" id="st-export-one">この旅を書き出す</button></div>' +
+    '<div class="setting-row"><span class="grow">すべての旅と写真をまとめて書き出します<br><span class="sub">端末が壊れたときのための控えです。最後に書き出した日: ' + (last ? new Date(last).toLocaleDateString('ja-JP') : 'まだありません') + '</span></span><button class="btn" type="button" id="st-export">すべて書き出す</button></div>' +
+    '<div class="setting-row"><span class="grow">書き出したファイルを読み込みます。入っていた旅が増えます。同じ旅は新しい方を残します</span><label class="btn" for="st-file">読み込む</label><input type="file" id="st-file" accept=".zip,application/zip" hidden></div>' +
+    '<div class="setting-row"><span class="grow">使い方を試せるサンプルの旅（北海道・11泊）を追加します</span><button class="btn" type="button" id="st-sample">サンプルを追加</button></div></section>' +
     '<section style="display:flex;flex-direction:column;gap:4px"><h3>この端末の保存</h3>' +
     '<p class="sub">データはこの端末のブラウザの中だけにあり、どこにも送りません。地名で場所を探すときだけ、探す言葉を国土地理院の検索サービスに送ります。</p>' +
     '<p class="sub">消えにくい保存: ' + (persisted === true ? '有効' : persisted === false ? '無効（ホーム画面に追加すると有効になりやすくなります）' : '不明') + (usage ? '・使っている容量: ' + usage : '') + '</p></section>' +
@@ -132,7 +149,9 @@ async function settings(current: Trip): Promise<void> {
     const tid = await createTrip(name, ($('#st-newstart') as HTMLInputElement).value || todayIso());
     await store.setSetting('currentTrip', tid); location.hash = '#plan'; location.reload();
   });
-  $('#st-export')!.addEventListener('click', doExport);
+  $('#st-export')!.addEventListener('click', () => doExport());
+  $('#st-export-one')!.addEventListener('click', () => doExport(current.id));
+  $('#st-sample')!.addEventListener('click', loadSample);
   $('#st-file')!.addEventListener('change', (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) doImport(f); });
   $('#st-del')!.addEventListener('click', () => {
     $('#st-confirm')!.innerHTML = '<div class="banner row"><span class="grow">「' + esc(current.name) + '」の行程・予約・お金・やりたいこと・日記を消します。元に戻せません。先に書き出しておくと安心です</span><button class="btn small danger" type="button" id="st-del2">消す</button></div>';
@@ -163,7 +182,7 @@ async function boot(): Promise<void> {
     b.id = 'export-banner'; b.className = 'banner row export-banner';
     b.innerHTML = '<span class="grow">' + (last ? REMIND_DAYS + '日以上書き出していません' : 'まだ一度も書き出していません') + '。端末が壊れたときのために、ときどき書き出してください</span><button class="btn small" type="button" id="banner-export">今書き出す</button>';
     $('#view')!.before(b);
-    $('#banner-export')!.addEventListener('click', doExport);
+    $('#banner-export')!.addEventListener('click', () => doExport());
   }
 
   startApp({ db: scopedDb(store, 'trips/' + tid + '/'), assets: photos });

@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'japan.json'],
+      includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'japan.json', 'sample-trip.zip'],
       manifest: {
         name: '旅帳',
         short_name: '旅帳',
@@ -24,7 +24,7 @@ export default defineConfig({
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,json,svg,png}'] }
+      workbox: { globPatterns: ['**/*.{js,css,html,json,svg,png,zip}'] }
     })
   ]
 });

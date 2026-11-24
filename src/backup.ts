@@ -1,17 +1,23 @@
 // zip への書き出しと読み込み。
-// zip の中身: data.json（全データ。消した印のものも含む）と photos/<id>.jpg
+// zip の中身: data.json（データ。消した印のものも含む）と photos/<id>.jpg
+// 旅を1つだけ書き出すこともできる（一緒に行く人に、その旅だけを渡すため）
 import JSZip from 'jszip';
 import type { DocRecord, Store } from './store';
 
 const FORMAT = 'tabicho-backup';
 const VERSION = 1;
 
-export async function exportZip(store: Store): Promise<Blob> {
+export async function exportZip(store: Store, tripId?: string): Promise<Blob> {
   const zip = new JSZip();
-  const records = store.allRecords();
+  const inTrip = (path: string) => !tripId || path === 'trips/' + tripId || path.startsWith('trips/' + tripId + '/');
+  const records = store.allRecords().filter((r) => inTrip(r.path));
   zip.file('data.json', JSON.stringify({ format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(), records }));
   const folder = zip.folder('photos')!;
-  for (const id of await store.allPhotoIds()) {
+  // 旅を1つだけ書き出すときは、その旅の日記にある写真だけを入れる
+  const ids = tripId
+    ? [...new Set(records.filter((r) => r.col.endsWith('/diary') && r.data && Array.isArray(r.data.photos)).flatMap((r) => r.data!.photos as string[]))]
+    : await store.allPhotoIds();
+  for (const id of ids) {
     const b = await store.getPhoto(id);
     if (b) folder.file(id + '.jpg', b);
   }
