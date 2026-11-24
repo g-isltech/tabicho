@@ -4,6 +4,7 @@ import { Store, scopedDb, newId } from './store';
 import { Photos } from './photos';
 import { exportZip, importZip, saveFile } from './backup';
 import { startApp } from './app.js';
+import { buildShare, shareZip, shareHtml, DEFAULT_SHARE, type ShareOptions } from './share';
 
 const PREFS = ['北海道', '青森', '岩手', '宮城', '秋田', '山形', '福島', '茨城', '栃木', '群馬', '埼玉', '千葉', '東京', '神奈川', '新潟', '富山', '石川', '福井', '山梨', '長野', '岐阜', '静岡', '愛知', '三重', '滋賀', '京都', '大阪', '兵庫', '奈良', '和歌山', '鳥取', '島根', '岡山', '広島', '山口', '徳島', '香川', '愛媛', '高知', '福岡', '佐賀', '長崎', '熊本', '大分', '宮崎', '鹿児島', '沖縄'];
 const BUDGET_KEYS = ['宿泊', '食費', '交通', 'ガソリン・高速', '観光・体験', '予備費'];
@@ -18,10 +19,10 @@ registerSW({ immediate: true });
 const store = new Store();
 const photos = new Photos(store);
 
-interface Trip { id: string; name: string; createdAt: number }
+interface Trip { id: string; name: string; createdAt: number; readonly: boolean }
 
 function trips(): Trip[] {
-  return store.list('trips').map((r) => ({ id: r.id, name: String(r.data?.name || '名前のない旅'), createdAt: Number(r.data?.createdAt || 0) }))
+  return store.list('trips').map((r) => ({ id: r.id, name: String(r.data?.name || '名前のない旅'), createdAt: Number(r.data?.createdAt || 0), readonly: !!r.data?.readonly }))
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -79,6 +80,76 @@ async function doImport(file: File): Promise<void> {
   } catch (e) { toast(e instanceof Error ? e.message : '読み込めませんでした'); }
 }
 
+// ---------- 旅の記録の共有 ----------
+const SHARE_ITEMS: [keyof ShareOptions, string, string][] = [
+  ['diary', '日記の文章', ''],
+  ['photos', '日記の写真', '撮影場所などの情報は消してあります'],
+  ['wishes', 'やりたいことと、かなえたこと', ''],
+  ['realDates', '本当の日付', '見せないときは「1日目」「2日目」と表示します'],
+  ['lodgingNames', '宿・キャンプ場の名前', '見せないときは地名だけです'],
+  ['money', '予算と出費', ''],
+  ['bookings', '予約（移動・見学）', '予約のメモは入れません']
+];
+function tripRange(tid: string): { start: Date; end: Date } {
+  const st = String(store.read('trips/' + tid + '/meta/trip')?.start || todayIso());
+  const [y, m, d] = st.split('-').map(Number); const start = new Date(y, m - 1, d);
+  const nights = store.list('trips/' + tid + '/stops').reduce((a, r) => a + (Number(r.data?.nights) || 0), 0);
+  return { start, end: new Date(y, m - 1, d + nights) };
+}
+async function shareSheet(current: Trip): Promise<void> {
+  let saved: Partial<ShareOptions> = {};
+  try { saved = (await store.getSetting<Partial<ShareOptions>>('shareOptions')) || {}; } catch { /* 初めて */ }
+  const opt: ShareOptions = { ...DEFAULT_SHARE, ...saved };
+  const { start, end } = tripRange(current.id); const now = new Date();
+  const during = now >= start && now < end;
+  sheet('<h2>旅の記録を共有する</h2><p style="margin:0">「' + esc(current.name) + '」を人に見せるためのファイルを作ります。行程と地図はいつも入ります。メモは入りません。</p>' +
+    (during ? '<p class="banner" style="margin:0">今は旅の途中です。共有すると、今いる場所や家を空けていることが相手に伝わります。旅が終わってから共有するのがおすすめです。</p>' : '') +
+    '<form id="sh-form" style="display:flex;flex-direction:column;gap:2px"><h3>見せる項目</h3>' +
+    SHARE_ITEMS.map(([k, label, note]) => '<label class="setting-row" style="cursor:pointer"><span class="grow">' + esc(label) + (note ? '<br><span class="sub">' + esc(note) + '</span>' : '') + '</span><input type="checkbox" data-sh="' + k + '"' + (opt[k] ? ' checked' : '') + ' style="width:24px;height:24px;accent-color:var(--road)"></label>').join('') +
+    '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">' +
+    '<button class="btn primary" type="button" data-sh-make="html">見るだけのページを作る</button><p class="sub" style="margin:0">HTML ファイル1つ。旅帳を持っていない人も、受け取ってタップすれば見られます</p>' +
+    '<button class="btn" type="button" data-sh-make="zip">旅帳で開けるファイルを作る</button><p class="sub" style="margin:0">受け取った人の旅帳に「もらった旅」として入ります。見るだけで、もとに自分の旅を作れます</p>' +
+    '<button class="btn" type="button" data-close>やめる</button></div></form>');
+  document.querySelectorAll<HTMLButtonElement>('[data-sh-make]').forEach((b) => b.addEventListener('click', async () => {
+    document.querySelectorAll<HTMLInputElement>('[data-sh]').forEach((i) => { (opt as unknown as Record<string, boolean>)[i.dataset.sh!] = i.checked; });
+    try { await store.setSetting('shareOptions', opt); } catch { /* 覚えられなくても続ける */ }
+    const kind = b.dataset.shMake as 'html' | 'zip';
+    toast('作っています');
+    let blob: Blob;
+    try {
+      const built = buildShare(store, current.id, opt);
+      if (kind === 'zip') blob = await shareZip(store, built);
+      else {
+        let geo: Record<string, string> | null = null;
+        try { geo = await (await fetch(import.meta.env.BASE_URL + 'japan.json')).json(); } catch { /* 地図なしで作る */ }
+        blob = await shareHtml(store, built, geo, location.origin + import.meta.env.BASE_URL);
+      }
+    } catch (e) { console.error(e); toast('作れませんでした'); return; }
+    const name = 'tabicho-share-' + todayIso().replace(/-/g, '') + (kind === 'html' ? '.html' : '.zip');
+    sheet('<h2>共有するファイルができました</h2><p style="margin:0">' + esc(name) + '（' + (blob.size / 1024 / 1024).toFixed(1) + 'MB）</p>' +
+      '<p class="sub">スマホでは、開いた画面から LINE などで送るか、「\"ファイル\"に保存」を選んでください。</p>' +
+      '<div class="row"><button class="btn primary grow" type="button" id="sh-save">送る・保存する</button><button class="btn" type="button" data-close>閉じる</button></div>');
+    $('#sh-save')!.addEventListener('click', async () => { const r = await saveFile(blob, name); if (r !== 'cancelled') { closeSheet(); toast('できました'); } });
+  }));
+}
+// もらった旅をもとに、自分の旅を作る（行程とやりたいことを写す。日記・お金・予約は写さない）
+async function copyTrip(src: Trip): Promise<void> {
+  const tid = await createTrip(src.name + '（もとにした旅）', todayIso());
+  const from = 'trips/' + src.id + '/', to = 'trips/' + tid + '/';
+  for (const r of store.list(from + 'stops')) {
+    const s = r.data || {};
+    const keep: Record<string, unknown> = {};
+    ['order', 'place', 'pref', 'region', 'nights', 'kind', 'lodging', 'what', 'lat', 'lng', 'arrive'].forEach((k) => { if (s[k] !== undefined) keep[k] = s[k]; });
+    await store.write(to + 'stops/' + r.id, { ...keep, booking: 'none', cost: 0, lodgingName: '', memo: '' });
+  }
+  for (const r of store.list(from + 'wishes')) {
+    const w = r.data || {}; if (Array.isArray(w.items) && w.items.length) await store.write(to + 'wishes/' + r.id, { pref: w.pref, code: w.code, items: w.items });
+  }
+  await store.setSetting('currentTrip', tid);
+  toast('自分の旅として作りました。出発日を決めてください');
+  location.hash = '#plan'; setTimeout(() => location.reload(), 900);
+}
+
 // サンプルの旅を読み込む（アプリと一緒に置いてある zip を使う）
 async function loadSample(): Promise<void> {
   try {
@@ -125,6 +196,9 @@ async function settings(current: Trip): Promise<void> {
     '<section style="display:flex;flex-direction:column;gap:8px"><h3>旅</h3>' + list.map((t) => '<button type="button" class="trip-item" data-st-trip="' + esc(t.id) + '" aria-current="' + (t.id === current.id) + '"><span class="grow"><b>' + esc(t.name) + '</b></span>' + (t.id === current.id ? '<span class="pill booked">表示中</span>' : '<span class="sub">切り替える</span>') + '</button>').join('') +
     '<form id="st-rename" class="row"><input class="i grow" id="st-name" value="' + esc(current.name) + '" aria-label="表示中の旅の名前"><button class="btn" type="submit">名前を変える</button></form>' +
     '<form id="st-new" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"><input class="i" id="st-newname" placeholder="新しい旅の名前" required aria-label="新しい旅の名前"><div class="row"><input class="i grow" id="st-newstart" type="date" value="' + todayIso() + '" aria-label="新しい旅の出発日"><button class="btn" type="submit">新しい旅を作る</button></div></form></section>' +
+    (current.readonly
+      ? '<section style="display:flex;flex-direction:column;gap:4px"><h3>もらった旅</h3><div class="setting-row"><span class="grow">この旅は見るだけです。行程とやりたいことを写して、自分の旅として作れます</span><button class="btn primary" type="button" id="st-copy">この旅をもとに作る</button></div></section>'
+      : '<section style="display:flex;flex-direction:column;gap:4px"><h3>旅の記録を共有する</h3><div class="setting-row"><span class="grow">「こんな旅をした」と人に見せるためのファイルを作ります。見せる項目を選べます</span><button class="btn primary" type="button" id="st-share">共有する</button></div></section>') +
     '<section style="display:flex;flex-direction:column;gap:4px"><h3>書き出しと読み込み</h3>' +
     '<div class="setting-row"><span class="grow">表示中の旅「' + esc(current.name) + '」だけを書き出します<br><span class="sub">一緒に行く人に渡すときに使います。渡された人は「読み込む」で開けます</span></span><button class="btn primary" type="button" id="st-export-one">この旅を書き出す</button></div>' +
     '<div class="setting-row"><span class="grow">すべての旅と写真をまとめて書き出します<br><span class="sub">端末が壊れたときのための控えです。最後に書き出した日: ' + (last ? new Date(last).toLocaleDateString('ja-JP') : 'まだありません') + '</span></span><button class="btn" type="button" id="st-export">すべて書き出す</button></div>' +
@@ -150,6 +224,8 @@ async function settings(current: Trip): Promise<void> {
     await store.setSetting('currentTrip', tid); location.hash = '#plan'; location.reload();
   });
   $('#st-export')!.addEventListener('click', () => doExport());
+  $('#st-share')?.addEventListener('click', () => shareSheet(current));
+  $('#st-copy')?.addEventListener('click', () => copyTrip(current));
   $('#st-export-one')!.addEventListener('click', () => doExport(current.id));
   $('#st-sample')!.addEventListener('click', loadSample);
   $('#st-file')!.addEventListener('change', (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) doImport(f); });
@@ -185,7 +261,9 @@ async function boot(): Promise<void> {
     $('#banner-export')!.addEventListener('click', () => doExport());
   }
 
-  startApp({ db: scopedDb(store, 'trips/' + tid + '/'), assets: photos });
+  const tdoc = store.read('trips/' + tid) || {};
+  if (tdoc.readonly) document.body.classList.add('readonly');
+  startApp({ db: scopedDb(store, 'trips/' + tid + '/'), assets: photos, readonly: !!tdoc.readonly, hidden: Array.isArray(tdoc.hidden) ? tdoc.hidden : [] });
 }
 
 boot().catch((e) => {

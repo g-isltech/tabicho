@@ -74,8 +74,9 @@ export function startApp(ctx) {
   const parseD = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, (m || 1) - 1, d || 1); };
   const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-  const md = (d) => (d.getMonth() + 1) + '/' + d.getDate();
-  const mdw = (d) => md(d) + '（' + WD[d.getDay()] + '）';
+  // 日付を隠して共有された旅は、本当の日付の代わりに「何日目」で表す
+  const md = (d) => (S.trip && S.trip.relative && S.trip.start ? (Math.round((d - parseD(S.trip.start)) / 86400000) + 1) + '日目' : (d.getMonth() + 1) + '/' + d.getDate());
+  const mdw = (d) => (S.trip && S.trip.relative ? md(d) : md(d) + '（' + WD[d.getDay()] + '）');
   const today = () => { const t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); };
   const dayDiff = (a, b) => Math.round((b - a) / 86400000);
   const icon = (p, s = 22) => '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>';
@@ -102,7 +103,8 @@ export function startApp(ctx) {
     const full = e && e.name === 'QuotaExceededError';
     toast(full ? 'この端末の保存できる容量がいっぱいです。写真を減らすか、書き出してから古い旅を消してください' : '保存できませんでした。もう一度試してください');
   }
-  const can = () => !!S.db;
+  // もらった旅（共有で受け取った旅）は見るだけにする
+  const can = () => !!S.db && !ctx.readonly;
   function doneBy(v) {
     if (!v || !v.at) return '';
     return '<br><span class="done-by">達成 ' + md(new Date(v.at)) + '</span>';
@@ -123,14 +125,15 @@ export function startApp(ctx) {
     const sch = schedule();
     const ti = tripInfo(sch);
     const st = $('#status');
-    if (!S.loaded.stops) st.textContent = '読み込み中';
+    if (ctx.readonly && S.loaded.stops) st.textContent = 'もらった旅（見るだけ）・' + sch.length + 'か所・' + ti.total + '泊';
+    else if (!S.loaded.stops) st.textContent = '読み込み中';
     else if (!sch.length) st.textContent = '行程はまだありません';
     else if (ti.phase === 'before') st.textContent = '出発まであと' + dayDiff(ti.t, ti.start) + '日・' + mdw(ti.start) + ' ' + (sch[0] ? sch[0].place + '発・' : '') + ti.total + '泊';
     else if (ti.phase === 'during') st.textContent = (ti.day) + '日目 / ' + ti.total + '泊・今夜は' + (ti.cur ? ti.cur.place : '');
     else st.textContent = '旅は' + mdw(ti.end) + 'に終わりました・' + ti.total + '泊';
     $('#syncdot').className = 'dot' + (S.live ? ' on' : '');
     $('#synctext').textContent = S.live ? 'この端末に保存' : '準備中';
-    $('#tabs').innerHTML = VIEWS.map((v) => '<a class="tab" href="#' + v.id + '"' + (UI.view === v.id ? ' aria-current="page"' : '') + '>' + icon(v.icon) + '<span>' + v.label + '</span></a>').join('');
+    $('#tabs').innerHTML = VIEWS.filter((v) => !(ctx.hidden || []).includes(v.id)).map((v) => '<a class="tab" href="#' + v.id + '"' + (UI.view === v.id ? ' aria-current="page"' : '') + '>' + icon(v.icon) + '<span>' + v.label + '</span></a>').join('');
     const fn = { map: vMap, plan: vPlan, book: vBook, money: vMoney, wish: vWish, diary: vDiary }[UI.view];
     const keep = UI.view === 'map' && $('#mapsvg');
     if (keep) { updateMap(sch, ti); const ms = $('#mapsel'); if (ms) ms.innerHTML = mapSel(sch, ti); return; }
@@ -766,6 +769,7 @@ export function startApp(ctx) {
       (S.assets ? '<label class="btn" for="diary-photo">写真を追加</label><input type="file" id="diary-photo" accept="image/*" multiple hidden>' : '') + '</div>' +
       (exists && can() ? '<div class="row"><span class="grow"></span><button class="btn small danger" type="button" data-del-diary="' + esc(k) + '">この日の日記を消す</button></div><div id="diary-confirm"></div>' : '') +
       '</section>';
+    if (ctx.readonly) h = '';
     const keys = Object.keys(S.diary).filter((x) => diaryHas(S.diary[x])).sort();
     if (UI.diaryOrder !== 'old') keys.reverse();
     h += '<section style="display:flex;flex-direction:column;gap:10px"><div class="sec-h"><h2>これまでの日記</h2><span class="sub num">' + keys.length + '日分</span></div>' +
@@ -773,7 +777,7 @@ export function startApp(ctx) {
     if (!keys.length) h += '<div class="empty">まだ日記はありません。上の欄に書いて保存すると、ここに並びます</div>';
     let lastM = '';
     keys.forEach((x) => {
-      const d = S.diary[x], dt = parseD(x), m = dt.getFullYear() + '年' + (dt.getMonth() + 1) + '月';
+      const d = S.diary[x], dt = parseD(x), m = S.trip.relative ? '' : dt.getFullYear() + '年' + (dt.getMonth() + 1) + '月';
       if (m !== lastM) { h += '<p class="month-h">' + m + '</p>'; lastM = m; }
       const pl = d.place !== undefined ? d.place : plannedPlace(sch, x);
       const ph = Array.isArray(d.photos) ? d.photos : [];
@@ -890,7 +894,7 @@ export function startApp(ctx) {
   });
 
   // ---------- ルーティング ----------
-  function route() { const h = (location.hash || '').slice(1); UI.view = VIEWS.some((v) => v.id === h) ? h : 'map'; closeSheet(); render(); window.scrollTo({ top: 0 }); }
+  function route() { const h = (location.hash || '').slice(1); UI.view = VIEWS.some((v) => v.id === h && !(ctx.hidden || []).includes(v.id)) ? h : 'map'; closeSheet(); render(); window.scrollTo({ top: 0 }); }
   window.addEventListener('hashchange', route);
   // アプリを開いたまま日付が変わったとき（翌朝に開き直したときなど）、今日に合わせて描き直す
   let lastDay = iso(today());
