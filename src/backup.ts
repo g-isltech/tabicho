@@ -18,7 +18,7 @@ export async function exportZip(store: Store): Promise<Blob> {
   return await zip.generateAsync({ type: 'blob', compression: 'STORE' });
 }
 
-export interface ImportResult { docs: number; photos: number }
+export interface ImportResult { docs: number; photos: number; tripIds: string[] }
 
 export async function importZip(store: Store, file: Blob): Promise<ImportResult> {
   const zip = await JSZip.loadAsync(file);
@@ -38,7 +38,9 @@ export async function importZip(store: Store, file: Blob): Promise<ImportResult>
     await store.putPhoto(id, new Blob([b], { type: 'image/jpeg' }));
     photos++;
   }
-  return { docs, photos };
+  // ファイルに入っていた旅（消した印のものは除く）。読み込んだあと、その旅を表示するために使う
+  const tripIds = valid.filter((r) => r.col === 'trips' && !r.deleted).map((r) => r.id);
+  return { docs, photos, tripIds };
 }
 
 /**

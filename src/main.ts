@@ -68,8 +68,11 @@ async function doExport(): Promise<void> {
 async function doImport(file: File): Promise<void> {
   try {
     const r = await importZip(store, file);
-    toast('読み込みました（データ' + r.docs + '件・写真' + r.photos + '枚）');
-    setTimeout(() => location.reload(), 800);
+    // 読み込んだ旅を表示する。今までの旅は残るので、設定から切り替えたり消したりできる
+    if (r.tripIds.length) await store.setSetting('currentTrip', r.tripIds[0]);
+    const name = r.tripIds.length ? String(store.read('trips/' + r.tripIds[0])?.name || '') : '';
+    toast(name ? '「' + name + '」を読み込みました。今までの旅は設定から切り替えられます' : '読み込みました（データ' + r.docs + '件・写真' + r.photos + '枚）');
+    setTimeout(() => location.reload(), 1600);
   } catch (e) { toast(e instanceof Error ? e.message : '読み込めませんでした'); }
 }
 
