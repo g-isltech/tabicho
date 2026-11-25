@@ -115,28 +115,91 @@ export async function shareZip(store: Store, b: ShareBuild): Promise<Blob> {
 
 const toDataUrl = (blob: Blob) => new Promise<string>((ok, ng) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => ng(r.error); r.readAsDataURL(blob); });
 
-/** 見るだけのページ（HTML ファイル1つ） */
+/**
+ * 見るだけのページ（HTML ファイル1つ）。
+ * iPhone の「ファイル」アプリや LINE のプレビューはページの中のスクリプトを動かさないので、
+ * 表示する中身は、ここですべて HTML に書き出しておく（スクリプトは入れない）。
+ */
 export async function shareHtml(store: Store, b: ShareBuild, geo: Record<string, string> | null, appUrl: string): Promise<Blob> {
   const get = (col: string) => b.records.filter((r) => r.col === 'trips/' + b.tripId + '/' + col).map((r) => ({ id: r.id, ...(r.data || {}) }) as Data & { id: string });
   const meta = b.records.find((r) => r.path === 'trips/' + b.tripId + '/meta/trip')?.data || {};
   const photos: Record<string, string> = {};
   for (const id of b.photoIds) { const blob = await store.getPhoto(id); if (blob) photos[id] = await toDataUrl(blob); }
-  const payload = {
-    name: b.name, start: meta.start, relative: !!meta.relative,
+  const budget = b.records.find((r) => r.path === 'trips/' + b.tripId + '/meta/budget')?.data || null;
+  const body = renderViewer({
+    name: b.name, start: String(meta.start || DUMMY_START), relative: !!meta.relative,
     stops: get('stops').sort((x, y) => Number(x.order || 0) - Number(y.order || 0)),
     diary: get('diary'), wishes: get('wishes'), done: get('wishdone').map((d) => d.id),
-    budget: b.records.find((r) => r.path === 'trips/' + b.tripId + '/meta/budget')?.data || null,
-    expenses: get('expenses'), bookings: get('bookings'), photos, appUrl
-  };
-  const json = JSON.stringify(payload).replace(/</g, '\\u003c');
-  const geoJson = JSON.stringify(geo || {}).replace(/</g, '\\u003c');
-  const html = VIEWER.replace('__TITLE__', escapeHtml(b.name)).replace('__DATA__', () => json).replace('__GEO__', () => geoJson);
+    budget, expenses: get('expenses'), bookings: get('bookings'), photos, appUrl
+  }, geo || {});
+  const html = VIEWER.replace('__TITLE__', () => esc(b.name)).replace('__BODY__', () => body);
   return new Blob([html], { type: 'text/html' });
 }
 
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
-// 見るだけのページのひな形。外部のファイルを読まずに、このファイルだけで表示できる
+interface ViewData {
+  name: string; start: string; relative: boolean;
+  stops: (Data & { id: string })[]; diary: (Data & { id: string })[]; wishes: (Data & { id: string })[]; done: string[];
+  budget: Data | null; expenses: (Data & { id: string })[]; bookings: (Data & { id: string })[];
+  photos: Record<string, string>; appUrl: string;
+}
+
+function renderViewer(D: ViewData, G: Record<string, string>): string {
+  const WD = '日月火水木金土';
+  const start = parseD(D.start);
+  const add = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const label = (d: Date) => (D.relative ? (dayDiff(start, d) + 1) + '日目' : (d.getMonth() + 1) + '/' + d.getDate() + '（' + WD[d.getDay()] + '）');
+  let cur = start, total = 0;
+  const stops = D.stops.map((s) => { const a = cur; const n = Number(s.nights) || 0; cur = add(cur, n); total += n; return { ...s, s: a, n } as Data & { id: string; s: Date; n: number }; });
+  const COS = Math.cos(36 * Math.PI / 180), PX = (l: number) => (l - 122.5) * COS * 100, PY = (l: number) => (45.8 - l) * 100;
+  const pts = stops.filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number') as (typeof stops[number] & { lat: number; lng: number })[];
+  let h = '<header><h1>' + esc(D.name) + '</h1><p class="sub">' + (stops.length ? (D.relative ? total + '泊の旅' : label(start) + '〜' + label(cur) + '・' + total + '泊') : '') + '</p></header>';
+  let items = 0, dn = 0; D.wishes.forEach((p) => ((p.items as Data[]) || []).forEach((w) => { items++; if (D.done.includes(String(w.id))) dn++; }));
+  if (pts.length) {
+    const xs = pts.map((s) => PX(s.lng)), ys = pts.map((s) => PY(s.lat));
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const w = Math.max(x1 - x0, 120), hh = Math.max(y1 - y0, 120), pad = Math.max(w, hh) * 0.12;
+    const vb = [x0 - pad - (w - (x1 - x0)) / 2, y0 - pad - (hh - (y1 - y0)) / 2, w + pad * 2, hh + pad * 2];
+    const u = vb[2] / 800, f = (n: number) => n.toFixed(1);
+    let svg = '<svg viewBox="' + vb.map(f).join(' ') + '" role="img" aria-label="旅のルートの地図">';
+    // 表示する範囲に入る県だけを描く（ファイルを小さくするため）
+    Object.keys(G).forEach((k) => { if (G[k]) svg += '<path d="' + G[k] + '" fill="#FBFBF8" stroke="#D5DDE0" stroke-width="' + f(u) + '"/>'; });
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], c = pts[i], m = String(c.arrive || 'car');
+      const st = m === 'ship' ? 'stroke="#1F7470" stroke-dasharray="' + f(7 * u) + ' ' + f(5 * u) + '"' : m === 'plane' ? 'stroke="#6B7378" stroke-dasharray="' + f(u) + ' ' + f(5 * u) + '" stroke-linecap="round"' : 'stroke="#1F4FA0" stroke-linecap="round"';
+      svg += '<line x1="' + f(PX(a.lng)) + '" y1="' + f(PY(a.lat)) + '" x2="' + f(PX(c.lng)) + '" y2="' + f(PY(c.lat)) + '" stroke-width="' + f(3 * u) + '" ' + st + '/>';
+    }
+    pts.forEach((s, i) => { svg += '<circle cx="' + f(PX(s.lng)) + '" cy="' + f(PY(s.lat)) + '" r="' + f(7 * u) + '" fill="#1F4FA0" stroke="#FBFBF8" stroke-width="' + f(2 * u) + '"><title>' + esc((i + 1) + '. ' + s.place) + '</title></circle>'; });
+    svg += '</svg>';
+    h += '<section class="card"><div class="map">' + svg + '</div><div class="stats"><div><span class="sub">泊数</span><b>' + total + '泊</b></div><div><span class="sub">泊まった所</span><b>' + stops.length + 'か所</b></div>' +
+      (items ? '<div><span class="sub">やりたいこと</span><b>' + dn + ' / ' + items + '</b></div>' : '') + '</div></section>';
+  }
+  h += '<section class="card"><h2>行程</h2>' + stops.map((s) => '<div class="stop"><div class="d">' + esc(label(s.s)) + '<br>' + s.n + '泊</div><div><b>' + esc(s.place) + '</b><span class="sub"> ' + esc(s.pref) + '</span>' + (s.lodging ? '<span class="pill">' + esc(s.lodging) + '</span>' : '') +
+    (s.lodgingName ? '<div class="d">' + esc(s.lodgingName) + '</div>' : '') + (s.what ? '<div class="d">' + esc(s.what) + '</div>' : '') + '</div></div>').join('') + '</section>';
+  const diary = D.diary.slice().sort((a, b) => (a.id < b.id ? -1 : 1));
+  if (diary.length) {
+    h += '<section class="card"><h2>日記</h2>' + diary.map((d) => {
+      const ph = ((d.photos as string[]) || []).filter((p) => D.photos[p]);
+      return '<div class="entry"><div><b>' + esc(label(parseD(d.id))) + '</b> <span class="sub">' + esc(d.place) + '</span></div>' + (d.text ? '<p>' + esc(d.text) + '</p>' : '') +
+        (ph.length ? '<div class="photos">' + ph.map((p) => '<img src="' + D.photos[p] + '" alt="' + esc(label(parseD(d.id))) + 'の写真">').join('') + '</div>' : '') + '</div>';
+    }).join('') + '</section>';
+  }
+  const doneList: string[] = [];
+  D.wishes.forEach((p) => ((p.items as Data[]) || []).forEach((w) => { if (D.done.includes(String(w.id))) doneList.push(esc(p.pref) + '・' + esc(w.n)); }));
+  if (doneList.length) h += '<section class="card"><h2>かなえたこと</h2><p style="margin:0">' + doneList.join('<br>') + '</p></section>';
+  if (D.budget) {
+    const sum: Record<string, number> = {}; let all = 0;
+    D.expenses.forEach((e) => { const a = Number(e.amount) || 0; sum[String(e.cat)] = (sum[String(e.cat)] || 0) + a; all += a; });
+    const yen = (n: number) => '¥' + Math.round(n).toLocaleString('ja-JP');
+    h += '<section class="card"><h2>お金</h2><div class="row"><span>使った額</span><b>' + yen(all) + '</b></div>' + Object.keys(sum).map((k) => '<div class="row"><span>' + esc(k) + '</span><span>' + yen(sum[k]) + '</span></div><div class="bar"><b style="width:' + (all ? (sum[k] / all * 100).toFixed(1) : 0) + '%"></b></div>').join('') + '</section>';
+  }
+  if (D.bookings.length) h += '<section class="card"><h2>移動・見学</h2>' + D.bookings.map((b) => '<div class="row"><span>' + esc(b.title) + '</span><span class="sub">' + esc(b.kind) + '</span></div>').join('') + '</section>';
+  h += '<footer>この旅は <a href="' + esc(D.appUrl) + '">旅帳</a> でまとめました' + (Object.keys(G).length ? '<br>地図: 地球地図日本（国土地理院）を加工' : '') + '</footer>';
+  return h;
+}
+
+// 見るだけのページのひな形。スクリプトを使わず、このファイルだけで表示できる
 const VIEWER = `<!doctype html>
 <html lang="ja">
 <head>
@@ -144,100 +207,37 @@ const VIEWER = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>__TITLE__ - 旅帳</title>
 <style>
-:root{--sea:#E7EDF0;--land:#FBFBF8;--surface:#FFFFFF;--sunk:#F1F4F5;--ink:#1B2428;--muted:#5A666C;--line:#D5DDE0;--road:#1F4FA0;--road-soft:#DCE6F6;--warm:#C2581B;--ok:#2F7A4A;--ship:#1F7470;--plane:#6B7378}
-@media (prefers-color-scheme: dark){:root{--sea:#0F1518;--land:#1E272B;--surface:#182024;--sunk:#141B1E;--ink:#E4EAEC;--muted:#9AA7AD;--line:#2E3A3F;--road:#7EA6EC;--road-soft:#20304A;--warm:#F08A4B;--ok:#6CC38A;--ship:#5CC2BC;--plane:#8F9AA0;color-scheme:dark}}
+:root{color-scheme:light}
 *{box-sizing:border-box}
-body{margin:0;background:var(--sea);color:var(--ink);font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;font-size:15px;line-height:1.7;overflow-wrap:anywhere}
-.wrap{max-width:820px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+body{margin:0;background:#E7EDF0;color:#1B2428;font-family:-apple-system,"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;font-size:15px;line-height:1.7;overflow-wrap:anywhere;-webkit-text-size-adjust:100%}
+.wrap{max-width:820px;margin:0 auto;padding:16px 16px 40px;display:flex;flex-direction:column;gap:16px}
 header h1{margin:0;font-size:26px;line-height:1.3}
-.sub{color:var(--muted);font-size:13px;margin:0}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+.sub{color:#5A666C;font-size:13px;margin:0}
+.card{background:#fff;border:1px solid #D5DDE0;border-radius:12px;padding:16px}
 h2{margin:0 0 10px;font-size:18px}
 .stats{display:flex;gap:20px;flex-wrap:wrap;margin-top:8px}
 .stats b{display:block;font-size:22px}
-.map{background:var(--sea);border-radius:10px;overflow:hidden}
+.map{background:#E7EDF0;border-radius:10px;overflow:hidden}
 .map svg{width:100%;height:auto;display:block}
-.stop{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.stop{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;padding:10px 0;border-bottom:1px solid #D5DDE0}
 .stop:last-child{border-bottom:0}
-.d{font-size:13px;color:var(--muted)}
-.pill{display:inline-block;border-radius:6px;padding:0 6px;font-size:11.5px;background:var(--sunk);color:var(--muted);margin-left:6px}
-.entry{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.d{font-size:13px;color:#5A666C}
+.pill{display:inline-block;border-radius:6px;padding:0 6px;font-size:11.5px;background:#F1F4F5;color:#5A666C;margin-left:6px}
+.entry{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid #D5DDE0}
 .entry:last-child{border-bottom:0}
 .entry p{margin:0;white-space:pre-wrap}
 .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
-.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block;max-width:100%}
-.bar{height:10px;border-radius:5px;background:var(--sunk);overflow:hidden}
-.bar b{display:block;height:10px;background:var(--road)}
+.photos img{width:100%;height:auto;border-radius:8px;display:block;max-width:100%}
+.bar{height:10px;border-radius:5px;background:#F1F4F5;overflow:hidden;margin-bottom:6px}
+.bar b{display:block;height:10px;background:#1F4FA0}
 .row{display:flex;justify-content:space-between;gap:12px;font-size:14px}
-footer{text-align:center;font-size:12px;color:var(--muted)}
-footer a{color:var(--road)}
+footer{text-align:center;font-size:12px;color:#5A666C}
+footer a{color:#1F4FA0}
 </style>
 </head>
 <body>
-<div class="wrap" id="app"></div>
-<script type="application/json" id="data">__DATA__</script>
-<script type="application/json" id="geo">__GEO__</script>
-<script>
-(function(){
-  var D = JSON.parse(document.getElementById('data').textContent);
-  var G = JSON.parse(document.getElementById('geo').textContent);
-  var esc = function(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
-  var WD = '日月火水木金土';
-  var parse = function(s){ var a = String(s).split('-').map(Number); return new Date(a[0], (a[1]||1)-1, a[2]||1); };
-  var add = function(d, n){ var x = new Date(d); x.setDate(x.getDate()+n); return x; };
-  var diff = function(a, b){ return Math.round((b - a) / 86400000); };
-  var start = parse(D.start || '2000-01-01');
-  var label = function(d){ return D.relative ? (diff(start, d) + 1) + '日目' : (d.getMonth()+1) + '/' + d.getDate() + '（' + WD[d.getDay()] + '）'; };
-  var cur = start, total = 0;
-  var stops = D.stops.map(function(s){ var a = cur; cur = add(cur, +s.nights || 0); total += +s.nights || 0; return Object.assign({}, s, { s: a, e: cur }); });
-  var COS = Math.cos(36 * Math.PI / 180), PX = function(l){ return (l - 122.5) * COS * 100; }, PY = function(l){ return (45.8 - l) * 100; };
-  var pts = stops.filter(function(s){ return typeof s.lat === 'number'; });
-  var h = '<header><h1>' + esc(D.name) + '</h1><p class="sub">' + (stops.length ? (D.relative ? total + '泊の旅' : label(start) + '〜' + label(cur) + '・' + total + '泊') : '') + '</p></header>';
-  // 地図
-  if (pts.length) {
-    var xs = pts.map(function(s){ return PX(s.lng); }), ys = pts.map(function(s){ return PY(s.lat); });
-    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
-    var w = Math.max(x1 - x0, 120), hh = Math.max(y1 - y0, 120), pad = Math.max(w, hh) * 0.12;
-    var vb = [x0 - pad - (w - (x1 - x0)) / 2, y0 - pad - (hh - (y1 - y0)) / 2, w + pad * 2, hh + pad * 2];
-    var u = vb[2] / 800, svg = '<svg viewBox="' + vb.join(' ') + '" role="img" aria-label="旅のルートの地図">';
-    Object.keys(G).forEach(function(k){ if (G[k]) svg += '<path d="' + G[k] + '" fill="var(--land)" stroke="var(--line)" stroke-width="' + u + '"/>'; });
-    for (var i = 1; i < pts.length; i++) {
-      var a = pts[i-1], b = pts[i], m = b.arrive || 'car';
-      var st = m === 'ship' ? 'stroke="var(--ship)" stroke-dasharray="' + 7*u + ' ' + 5*u + '"' : m === 'plane' ? 'stroke="var(--plane)" stroke-dasharray="' + u + ' ' + 5*u + '" stroke-linecap="round"' : 'stroke="var(--road)" stroke-linecap="round"';
-      svg += '<line x1="' + PX(a.lng) + '" y1="' + PY(a.lat) + '" x2="' + PX(b.lng) + '" y2="' + PY(b.lat) + '" stroke-width="' + 3*u + '" ' + st + '/>';
-    }
-    pts.forEach(function(s, i){ svg += '<circle cx="' + PX(s.lng) + '" cy="' + PY(s.lat) + '" r="' + 7*u + '" fill="var(--road)" stroke="var(--land)" stroke-width="' + 2*u + '"><title>' + esc((i+1) + '. ' + s.place) + '</title></circle>'; });
-    svg += '</svg>';
-    h += '<section class="card"><div class="map">' + svg + '</div><div class="stats"><div><span class="sub">泊数</span><b>' + total + '泊</b></div><div><span class="sub">泊まった所</span><b>' + stops.length + 'か所</b></div>';
-    var items = 0, dn = 0; D.wishes.forEach(function(p){ (p.items || []).forEach(function(w){ items++; if (D.done.indexOf(w.id) >= 0) dn++; }); });
-    if (items) h += '<div><span class="sub">やりたいこと</span><b>' + dn + ' / ' + items + '</b></div>';
-    h += '</div></section>';
-  }
-  // 行程
-  h += '<section class="card"><h2>行程</h2>' + stops.map(function(s){
-    return '<div class="stop"><div class="d">' + esc(label(s.s)) + '<br>' + (+s.nights || 0) + '泊</div><div><b>' + esc(s.place) + '</b><span class="sub"> ' + esc(s.pref) + '</span>' + (s.lodging ? '<span class="pill">' + esc(s.lodging) + '</span>' : '') +
-      (s.lodgingName ? '<div class="d">' + esc(s.lodgingName) + '</div>' : '') + (s.what ? '<div class="d">' + esc(s.what) + '</div>' : '') + '</div></div>';
-  }).join('') + '</section>';
-  // 日記
-  var diary = D.diary.slice().sort(function(a, b){ return a.id < b.id ? -1 : 1; });
-  if (diary.length) h += '<section class="card"><h2>日記</h2>' + diary.map(function(d){
-    return '<div class="entry"><div><b>' + esc(label(parse(d.id))) + '</b> <span class="sub">' + esc(d.place) + '</span></div>' + (d.text ? '<p>' + esc(d.text) + '</p>' : '') +
-      ((d.photos || []).length ? '<div class="photos">' + d.photos.map(function(p){ return D.photos[p] ? '<img src="' + D.photos[p] + '" alt="' + esc(label(parse(d.id))) + 'の写真" loading="lazy">' : ''; }).join('') + '</div>' : '') + '</div>';
-  }).join('') + '</section>';
-  // やりたいことの達成
-  var doneList = []; D.wishes.forEach(function(p){ (p.items || []).forEach(function(w){ if (D.done.indexOf(w.id) >= 0) doneList.push(esc(p.pref) + '・' + esc(w.n)); }); });
-  if (doneList.length) h += '<section class="card"><h2>かなえたこと</h2><p style="margin:0">' + doneList.join('<br>') + '</p></section>';
-  // お金
-  if (D.budget) {
-    var sum = {}, all = 0; D.expenses.forEach(function(e){ sum[e.cat] = (sum[e.cat] || 0) + (+e.amount || 0); all += +e.amount || 0; });
-    var yen = function(n){ return '¥' + Math.round(n).toLocaleString('ja-JP'); };
-    h += '<section class="card"><h2>お金</h2><div class="row"><span>使った額</span><b>' + yen(all) + '</b></div>' + Object.keys(sum).map(function(k){ return '<div class="row"><span>' + esc(k) + '</span><span>' + yen(sum[k]) + '</span></div><div class="bar"><b style="width:' + (all ? sum[k] / all * 100 : 0) + '%"></b></div>'; }).join('') + '</section>';
-  }
-  // 予約
-  if (D.bookings.length) h += '<section class="card"><h2>移動・見学</h2>' + D.bookings.map(function(b){ return '<div class="row"><span>' + esc(b.title) + '</span><span class="sub">' + esc(b.kind) + '</span></div>'; }).join('') + '</section>';
-  h += '<footer>この旅は <a href="' + esc(D.appUrl) + '">旅帳</a> でまとめました' + (Object.keys(G).length ? '<br>地図: 地球地図日本（国土地理院）を加工' : '') + '</footer>';
-  document.getElementById('app').innerHTML = h;
-})();
-</script>
+<div class="wrap">
+__BODY__
+</div>
 </body>
 </html>`;

@@ -229,3 +229,7 @@ body{overflow-wrap:break-word}
 .d,.sub,.w,.n,p{overflow-wrap:anywhere}
 /* 古い iPhone（iOS 16.1 まで）は color-mix に対応していない。色を混ぜられないときも白く塗る */
 #g-pref path{fill:var(--land)}
+
+/* もらった旅（見るだけ） */
+.ro-note{margin:0;background:var(--road-soft);color:var(--road);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700}
+.trip-item.ro{border-style:dashed}

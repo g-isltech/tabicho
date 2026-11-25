@@ -105,6 +105,8 @@ export function startApp(ctx) {
   }
   // もらった旅（共有で受け取った旅）は見るだけにする
   const can = () => !!S.db && !ctx.readonly;
+  // 予約を共有されていない「もらった旅」では、予約の状態を出さない
+  const showBook = () => !(ctx.hidden || []).includes('book');
   function doneBy(v) {
     if (!v || !v.at) return '';
     return '<br><span class="done-by">達成 ' + md(new Date(v.at)) + '</span>';
@@ -133,11 +135,13 @@ export function startApp(ctx) {
     else st.textContent = '旅は' + mdw(ti.end) + 'に終わりました・' + ti.total + '泊';
     $('#syncdot').className = 'dot' + (S.live ? ' on' : '');
     $('#synctext').textContent = S.live ? 'この端末に保存' : '準備中';
-    $('#tabs').innerHTML = VIEWS.filter((v) => !(ctx.hidden || []).includes(v.id)).map((v) => '<a class="tab" href="#' + v.id + '"' + (UI.view === v.id ? ' aria-current="page"' : '') + '>' + icon(v.icon) + '<span>' + v.label + '</span></a>').join('');
+    const shown = VIEWS.filter((v) => !(ctx.hidden || []).includes(v.id));
+    $('#tabs').style.gridTemplateColumns = 'repeat(' + shown.length + ',minmax(0,1fr))';
+    $('#tabs').innerHTML = shown.map((v) => '<a class="tab" href="#' + v.id + '"' + (UI.view === v.id ? ' aria-current="page"' : '') + '>' + icon(v.icon) + '<span>' + v.label + '</span></a>').join('');
     const fn = { map: vMap, plan: vPlan, book: vBook, money: vMoney, wish: vWish, diary: vDiary }[UI.view];
     const keep = UI.view === 'map' && $('#mapsvg');
     if (keep) { updateMap(sch, ti); const ms = $('#mapsel'); if (ms) ms.innerHTML = mapSel(sch, ti); return; }
-    $('#view').innerHTML = fn(sch, ti);
+    $('#view').innerHTML = (ctx.readonly ? '<p class="ro-note">もらった旅です。見るだけで、書き換えはできません。設定の「この旅をもとに作る」で、自分の旅にできます</p>' : '') + fn(sch, ti);
     if (UI.view === 'map') { initMap(); updateMap(sch, ti); }
   }
 
@@ -170,10 +174,10 @@ export function startApp(ctx) {
     const c = REG[s.region] ? REG[s.region][1] : '#555';
     return '<div class="next"><div class="badge-n" style="background:' + c + '">' + (s.idx + 1) + '</div><div style="min-width:0;display:flex;flex-direction:column;gap:6px">' +
       '<p class="sub">' + esc(label) + '・' + mdw(s.start) + '〜' + mdw(s.end) + '</p>' +
-      '<div class="row"><h2>' + esc(s.place) + '</h2><span class="pill' + (s.kind === 'B' ? ' base' : '') + '">' + (KIND[s.kind] || '') + '</span><span class="pill ' + esc(s.booking || 'none') + '">' + (BOOK[s.booking] || '未予約') + '</span></div>' +
+      '<div class="row"><h2>' + esc(s.place) + '</h2><span class="pill' + (s.kind === 'B' ? ' base' : '') + '">' + (KIND[s.kind] || '') + '</span>' + (showBook() ? '<span class="pill ' + esc(s.booking || 'none') + '">' + (BOOK[s.booking] || '未予約') + '</span>' : '') + '</div>' +
       '<p class="sub">' + esc(s.pref) + '・' + (+s.nights || 0) + '泊・' + esc(s.lodging) + (s.lodgingName ? '（' + esc(s.lodgingName) + '）' : '') + '</p>' +
       (s.what ? '<p style="margin:0;font-size:14px">' + esc(s.what) + '</p>' : '') +
-      '<div class="row"><button class="btn small" data-edit-stop="' + esc(s.id) + '">この泊まりを編集</button><a class="btn small" href="#plan">行程で見る</a></div></div></div>';
+      '<div class="row">' + (ctx.readonly ? '' : '<button class="btn small" data-edit-stop="' + esc(s.id) + '">この泊まりを編集</button>') + '<a class="btn small" href="#plan">行程で見る</a></div></div></div>';
   }
   function initMap() {
     const svg = $('#mapsvg'); if (!svg) return;
@@ -283,13 +287,13 @@ export function startApp(ctx) {
     const rc = (r) => (REG[r] ? REG[r][1] : '#666'), rn = (r) => (REG[r] ? REG[r][0] : 'その他');
     let h = '<section class="card" style="display:flex;flex-direction:column;gap:12px">' +
       '<div class="sec-h"><h2>行程</h2><p class="sub num">' + sch.length + 'か所・' + total + '泊・' + mdw(ti.start) + '〜' + mdw(ti.end) + '</p></div>' +
-      '<div class="grid2"><label class="f">出発日<input class="i" type="date" id="trip-start" value="' + esc(S.trip.start) + '"' + (can() ? '' : ' disabled') + '></label>' +
+      (ctx.readonly ? '' : '<div class="grid2"><label class="f">出発日<input class="i" type="date" id="trip-start" value="' + esc(S.trip.start) + '"' + (can() ? '' : ' disabled') + '></label>' +
       '<div class="f">帰着日<div class="i num" style="display:flex;align-items:center">' + mdw(ti.end) + '</div></div></div>' +
-      '<p class="sub">出発日や泊数を変えると、後ろの日付がすべて自動でずれます</p>' +
+      '<p class="sub">出発日や泊数を変えると、後ろの日付がすべて自動でずれます</p>') +
       (runs.length ? '<div class="band" role="group" aria-label="地方ごとの泊数">' + runs.map((r, i) => r.nights ? '<button style="flex:' + r.nights + ';background:' + rc(r.region) + '" data-jump="' + i + '" aria-label="' + esc((i + 1) + '. ' + rn(r.region) + ' ' + r.nights + '泊') + '">' + (r.nights >= 8 ? (i + 1) : '') + '</button>' : '').join('') + '</div>' : '') +
       (runs.length ? '<div class="row" style="font-size:12px;color:var(--muted);gap:12px"><span>帯の色（地方）:</span>' + [...new Set(runs.map((r) => r.region))].map((r) => '<span><i class="lg" style="background:' + rc(r) + '"></i> ' + esc(rn(r)) + '</span>').join('') + '</div>' : '') +
       '<div class="row" style="font-size:12px;color:var(--muted);gap:12px"><span>丸の色（泊まり方・1つ1泊）:</span>' + Object.keys(LODG).map((k) => '<span><i class="lg" style="background:' + LODG[k] + '"></i> ' + k + '</span>').join('') + '</div>' +
-      '<button class="btn" id="plan-add"' + (can() ? '' : ' disabled') + '>＋ 泊まる場所を最後に追加</button></section>';
+      (ctx.readonly ? '' : '<button class="btn" id="plan-add"' + (can() ? '' : ' disabled') + '>＋ 泊まる場所を最後に追加</button>') + '</section>';
     if (!sch.length) return h + '<div class="empty">行程がまだありません。上の「＋ 泊まる場所を最後に追加」から1件目を作ってください</div>';
     runs.forEach((run, ri) => {
       const list = run.list;
@@ -297,9 +301,9 @@ export function startApp(ctx) {
       list.forEach((s) => {
         const now = ti.cur && ti.cur.id === s.id;
         const first = s.idx === 0, last = s.idx === sch.length - 1;
-        h += '<div class="stop-row"><button class="stop' + (now ? ' now' : '') + '" data-edit-stop="' + esc(s.id) + '"><div class="d"><b>' + md(s.start) + '</b>' + WD[s.start.getDay()] + '曜<br>' + (+s.nights || 0) + '泊</div>' +
+        h += '<div class="stop-row"><button class="stop' + (now ? ' now' : '') + '" data-edit-stop="' + esc(s.id) + '"><div class="d"><b>' + md(s.start) + '</b>' + (S.trip.relative ? '' : WD[s.start.getDay()] + '曜<br>') + (+s.nights || 0) + '泊</div>' +
           '<div style="min-width:0"><div class="t"><strong>' + esc(s.place) + '</strong><span class="sub">' + esc(s.pref) + '</span><span class="pill' + (s.kind === 'B' ? ' base' : '') + '">' + (KIND[s.kind] || '') + '</span>' +
-          '<span class="pill ' + esc(s.booking || 'none') + '">' + (BOOK[s.booking] || '未予約') + '</span>' +
+          (showBook() ? '<span class="pill ' + esc(s.booking || 'none') + '">' + (BOOK[s.booking] || '未予約') + '</span>' : '') +
           '<span class="nights" aria-label="' + esc(s.lodging) + '">' + Array.from({ length: Math.min(+s.nights || 0, 10) }, () => '<i style="background:' + (LODG[s.lodging] || '#999') + '"></i>').join('') + '</span></div>' +
           (s.what ? '<p class="w">' + esc(s.what) + '</p>' : '') + (s.memo ? '<p class="w" style="color:var(--ink)">メモ: ' + esc(s.memo) + '</p>' : '') + '</div></button>' +
           (can() ? '<div class="mv"><button data-move="' + esc(s.id) + '|-1" aria-label="' + esc(s.place) + 'を1つ前へ"' + (first ? ' disabled' : '') + '>↑</button><button data-move="' + esc(s.id) + '|1" aria-label="' + esc(s.place) + 'を1つ後ろへ"' + (last ? ' disabled' : '') + '>↓</button></div>' : '') + '</div>';
@@ -369,6 +373,11 @@ export function startApp(ctx) {
     apply();
   }
   function stopSheet(id, insertAfter) {
+    if (ctx.readonly) {
+      const s = schedule().find((x) => x.id === id); if (!s) return;
+      openSheet('<div class="card" style="border:0;padding:0">' + stopSummary(s, (s.idx + 1) + '番目の泊まり') + '</div><button class="btn" type="button" data-close>閉じる</button>');
+      return;
+    }
     const sch = schedule();
     const s = id ? sch.find((x) => x.id === id) : null;
     const atEnd = !s && !insertAfter;
@@ -774,7 +783,7 @@ export function startApp(ctx) {
     if (UI.diaryOrder !== 'old') keys.reverse();
     h += '<section style="display:flex;flex-direction:column;gap:10px"><div class="sec-h"><h2>これまでの日記</h2><span class="sub num">' + keys.length + '日分</span></div>' +
       (keys.length > 1 ? '<div class="chips" role="group" aria-label="並び順">' + [['new', '新しい順'], ['old', '古い順']].map((x) => '<button class="chip" data-dorder="' + x[0] + '" aria-pressed="' + ((UI.diaryOrder || 'new') === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' : '');
-    if (!keys.length) h += '<div class="empty">まだ日記はありません。上の欄に書いて保存すると、ここに並びます</div>';
+    if (!keys.length) h += '<div class="empty">' + (ctx.readonly ? 'この旅では、日記は共有されていません' : 'まだ日記はありません。上の欄に書いて保存すると、ここに並びます') + '</div>';
     let lastM = '';
     keys.forEach((x) => {
       const d = S.diary[x], dt = parseD(x), m = S.trip.relative ? '' : dt.getFullYear() + '年' + (dt.getMonth() + 1) + '月';

@@ -188,16 +188,18 @@ function onboarding(): void {
 
 // ---------- 設定 ----------
 async function settings(current: Trip): Promise<void> {
+  const tripItem = (t: Trip) => '<button type="button" class="trip-item' + (t.readonly ? ' ro' : '') + '" data-st-trip="' + esc(t.id) + '" aria-current="' + (t.id === current.id) + '"><span class="grow"><b>' + esc(t.name) + '</b>' + (t.readonly ? '<br><span class="sub">見るだけ</span>' : '') + '</span>' + (t.id === current.id ? '<span class="pill booked">表示中</span>' : '<span class="sub">切り替える</span>') + '</button>';
   const last = await store.getSetting<number>('lastExport');
   let persisted: boolean | null = null; let usage = '';
   try { persisted = (await navigator.storage?.persisted?.()) ?? null; const est = await navigator.storage?.estimate?.(); if (est?.usage) usage = (est.usage / 1024 / 1024).toFixed(1) + 'MB'; } catch { /* 取れない端末もある */ }
   const list = trips();
   sheet('<h2>設定とデータ</h2>' +
-    '<section style="display:flex;flex-direction:column;gap:8px"><h3>旅</h3>' + list.map((t) => '<button type="button" class="trip-item" data-st-trip="' + esc(t.id) + '" aria-current="' + (t.id === current.id) + '"><span class="grow"><b>' + esc(t.name) + '</b></span>' + (t.id === current.id ? '<span class="pill booked">表示中</span>' : '<span class="sub">切り替える</span>') + '</button>').join('') +
+    '<section style="display:flex;flex-direction:column;gap:8px"><h3>自分の旅</h3>' + (list.filter((t) => !t.readonly).map(tripItem).join('') || '<p class="sub" style="margin:0">まだありません。下から作れます</p>') +
+    (list.some((t) => t.readonly) ? '<h3 style="margin-top:8px">もらった旅（見るだけ）</h3>' + list.filter((t) => t.readonly).map(tripItem).join('') : '') +
     '<form id="st-rename" class="row"><input class="i grow" id="st-name" value="' + esc(current.name) + '" aria-label="表示中の旅の名前"><button class="btn" type="submit">名前を変える</button></form>' +
     '<form id="st-new" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"><input class="i" id="st-newname" placeholder="新しい旅の名前" required aria-label="新しい旅の名前"><div class="row"><input class="i grow" id="st-newstart" type="date" value="' + todayIso() + '" aria-label="新しい旅の出発日"><button class="btn" type="submit">新しい旅を作る</button></div></form></section>' +
     (current.readonly
-      ? '<section style="display:flex;flex-direction:column;gap:4px"><h3>もらった旅</h3><div class="setting-row"><span class="grow">この旅は見るだけです。行程とやりたいことを写して、自分の旅として作れます</span><button class="btn primary" type="button" id="st-copy">この旅をもとに作る</button></div></section>'
+      ? '<section style="display:flex;flex-direction:column;gap:4px"><h3>自分の旅にする</h3><div class="setting-row"><span class="grow">この旅は見るだけです。行程とやりたいことを写して、自分の旅として作れます</span><button class="btn primary" type="button" id="st-copy">この旅をもとに作る</button></div></section>'
       : '<section style="display:flex;flex-direction:column;gap:4px"><h3>旅の記録を共有する</h3><div class="setting-row"><span class="grow">「こんな旅をした」と人に見せるためのファイルを作ります。見せる項目を選べます</span><button class="btn primary" type="button" id="st-share">共有する</button></div></section>') +
     '<section style="display:flex;flex-direction:column;gap:4px"><h3>書き出しと読み込み</h3>' +
     '<div class="setting-row"><span class="grow">表示中の旅「' + esc(current.name) + '」だけを書き出します<br><span class="sub">一緒に行く人に渡すときに使います。渡された人は「読み込む」で開けます</span></span><button class="btn primary" type="button" id="st-export-one">この旅を書き出す</button></div>' +
@@ -253,7 +255,8 @@ async function boot(): Promise<void> {
 
   const last = await store.getSetting<number>('lastExport');
   const hasData = store.list('trips/' + tid + '/stops').length > 0;
-  if (hasData && (!last || Date.now() - last > REMIND_DAYS * 86400000)) {
+  const curDoc = store.read('trips/' + tid) || {};
+  if (hasData && !curDoc.readonly && (!last || Date.now() - last > REMIND_DAYS * 86400000)) {
     const b = document.createElement('div');
     b.id = 'export-banner'; b.className = 'banner row export-banner';
     b.innerHTML = '<span class="grow">' + (last ? REMIND_DAYS + '日以上書き出していません' : 'まだ一度も書き出していません') + '。端末が壊れたときのために、ときどき書き出してください</span><button class="btn small" type="button" id="banner-export">今書き出す</button>';
