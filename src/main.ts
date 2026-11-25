@@ -4,7 +4,7 @@ import { Store, scopedDb, newId } from './store';
 import { Photos } from './photos';
 import { exportZip, importZip, saveFile } from './backup';
 import { startApp } from './app.js';
-import { buildShare, shareZip, shareHtml, DEFAULT_SHARE, type ShareOptions } from './share';
+import { buildShare, shareZip, shareHtml, shareImage, DEFAULT_SHARE, type ShareOptions } from './share';
 
 const PREFS = ['北海道', '青森', '岩手', '宮城', '秋田', '山形', '福島', '茨城', '栃木', '群馬', '埼玉', '千葉', '東京', '神奈川', '新潟', '富山', '石川', '福井', '山梨', '長野', '岐阜', '静岡', '愛知', '三重', '滋賀', '京都', '大阪', '兵庫', '奈良', '和歌山', '鳥取', '島根', '岡山', '広島', '山口', '徳島', '香川', '愛媛', '高知', '福岡', '佐賀', '長崎', '熊本', '大分', '宮崎', '鹿児島', '沖縄'];
 const BUDGET_KEYS = ['宿泊', '食費', '交通', 'ガソリン・高速', '観光・体験', '予備費'];
@@ -107,25 +107,31 @@ async function shareSheet(current: Trip): Promise<void> {
     '<form id="sh-form" style="display:flex;flex-direction:column;gap:2px"><h3>見せる項目</h3>' +
     SHARE_ITEMS.map(([k, label, note]) => '<label class="setting-row" style="cursor:pointer"><span class="grow">' + esc(label) + (note ? '<br><span class="sub">' + esc(note) + '</span>' : '') + '</span><input type="checkbox" data-sh="' + k + '"' + (opt[k] ? ' checked' : '') + ' style="width:24px;height:24px;accent-color:var(--road)"></label>').join('') +
     '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">' +
-    '<button class="btn primary" type="button" data-sh-make="html">見るだけのページを作る</button><p class="sub" style="margin:0">HTML ファイル1つ。旅帳を持っていない人も、受け取ってタップすれば見られます</p>' +
+    '<button class="btn primary" type="button" data-sh-make="png">まとめ画像を作る</button><p class="sub" style="margin:0">地図・行程・写真（4枚まで）を縦長の画像1枚に。LINE やインスタにそのまま送れます</p>' +
+    '<button class="btn" type="button" data-sh-make="html">見るだけのページを作る</button><p class="sub" style="margin:0">HTML ファイル1つ。旅帳を持っていない人も、受け取ってタップすれば見られます</p>' +
     '<button class="btn" type="button" data-sh-make="zip">旅帳で開けるファイルを作る</button><p class="sub" style="margin:0">受け取った人の旅帳に「もらった旅」として入ります。見るだけで、もとに自分の旅を作れます</p>' +
     '<button class="btn" type="button" data-close>やめる</button></div></form>');
   document.querySelectorAll<HTMLButtonElement>('[data-sh-make]').forEach((b) => b.addEventListener('click', async () => {
     document.querySelectorAll<HTMLInputElement>('[data-sh]').forEach((i) => { (opt as unknown as Record<string, boolean>)[i.dataset.sh!] = i.checked; });
     try { await store.setSetting('shareOptions', opt); } catch { /* 覚えられなくても続ける */ }
-    const kind = b.dataset.shMake as 'html' | 'zip';
+    const kind = b.dataset.shMake as 'html' | 'zip' | 'png';
     toast('作っています');
     let blob: Blob;
     try {
       const built = buildShare(store, current.id, opt);
       if (kind === 'zip') blob = await shareZip(store, built);
+      else if (kind === 'png') {
+        let geo: Record<string, string> | null = null;
+        try { geo = await (await fetch(import.meta.env.BASE_URL + 'japan.json')).json(); } catch { /* 地図なしで作る */ }
+        blob = await shareImage(store, built, geo, location.origin + import.meta.env.BASE_URL);
+      }
       else {
         let geo: Record<string, string> | null = null;
         try { geo = await (await fetch(import.meta.env.BASE_URL + 'japan.json')).json(); } catch { /* 地図なしで作る */ }
         blob = await shareHtml(store, built, geo, location.origin + import.meta.env.BASE_URL);
       }
     } catch (e) { console.error(e); toast('作れませんでした'); return; }
-    const name = 'tabicho-share-' + todayIso().replace(/-/g, '') + (kind === 'html' ? '.html' : '.zip');
+    const name = 'tabicho-share-' + todayIso().replace(/-/g, '') + (kind === 'html' ? '.html' : kind === 'png' ? '.png' : '.zip');
     sheet('<h2>共有するファイルができました</h2><p style="margin:0">' + esc(name) + '（' + (blob.size / 1024 / 1024).toFixed(1) + 'MB）</p>' +
       '<p class="sub">スマホでは、開いた画面から LINE などで送るか、「\"ファイル\"に保存」を選んでください。</p>' +
       '<div class="row"><button class="btn primary grow" type="button" id="sh-save">送る・保存する</button><button class="btn" type="button" data-close>閉じる</button></div>');

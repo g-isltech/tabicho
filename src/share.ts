@@ -241,3 +241,105 @@ __BODY__
 </div>
 </body>
 </html>`;
+
+/**
+ * まとめ画像（PNG）。LINE やインスタなどにそのまま送れる。
+ * 地図とルート、泊数などの数字、行程の一覧、日記の写真（最大4枚）を縦長の1枚に描く。
+ * 見せる項目の選び方（日付を隠す、写真を入れない など）は、ほかの形と同じに従う。
+ */
+export async function shareImage(store: Store, b: ShareBuild, geo: Record<string, string> | null, appUrl: string): Promise<Blob> {
+  const get = (col: string) => b.records.filter((r) => r.col === 'trips/' + b.tripId + '/' + col).map((r) => ({ id: r.id, ...(r.data || {}) }) as Data & { id: string });
+  const meta = b.records.find((r) => r.path === 'trips/' + b.tripId + '/meta/trip')?.data || {};
+  const relative = !!meta.relative; const start = parseD(String(meta.start || DUMMY_START));
+  const WD = '日月火水木金土';
+  const label = (d: Date) => (relative ? (dayDiff(start, d) + 1) + '日目' : (d.getMonth() + 1) + '/' + d.getDate() + '（' + WD[d.getDay()] + '）');
+  let cur = start, total = 0;
+  const stops = get('stops').sort((x, y) => Number(x.order || 0) - Number(y.order || 0)).map((s) => { const a = cur; const n = Number(s.nights) || 0; cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + n); total += n; return { ...s, s: a, n } as Data & { id: string; s: Date; n: number }; });
+  let items = 0, dn = 0; const done = new Set(get('wishdone').map((d) => d.id));
+  get('wishes').forEach((p) => ((p.items as Data[]) || []).forEach((w) => { items++; if (done.has(String(w.id))) dn++; }));
+  // 写真は日記の日付順に最大4枚
+  const photoIds = get('diary').sort((a, c) => (a.id < c.id ? -1 : 1)).flatMap((d) => (d.photos as string[]) || []).slice(0, 4);
+  const imgs: ImageBitmap[] = [];
+  for (const id of photoIds) { const blob = await store.getPhoto(id); if (blob) { try { imgs.push(await createImageBitmap(blob)); } catch { /* 読めない写真は飛ばす */ } } }
+
+  const W = 1080, P = 64, FONT = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",sans-serif';
+  const MAX_ROWS = 40, ROW = 64;
+  const rows = stops.slice(0, MAX_ROWS);
+  const mapH = 760, photoH = imgs.length ? (imgs.length <= 2 ? 460 : 920) + 40 : 0;
+  const H = P + 150 + mapH + 40 + 150 + 70 + rows.length * ROW + (stops.length > MAX_ROWS ? ROW : 0) + 40 + photoH + 120;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'); if (!g) throw new Error('canvas not available');
+  const C = { sea: '#E7EDF0', land: '#FBFBF8', line: '#D5DDE0', ink: '#1B2428', muted: '#5A666C', road: '#1F4FA0', ship: '#1F7470', plane: '#6B7378', card: '#FFFFFF' };
+  const text = (s: string, x: number, y: number, size: number, color = C.ink, weight = 400, maxW = W - P * 2) => {
+    g.font = weight + ' ' + size + 'px ' + FONT; g.fillStyle = color;
+    let t = s; if (g.measureText(t).width > maxW) { while (t.length > 1 && g.measureText(t + '…').width > maxW) t = t.slice(0, -1); t += '…'; }
+    g.fillText(t, x, y); return g.measureText(t).width;
+  };
+  const round = (x: number, y: number, w: number, h: number, r: number) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+  g.fillStyle = C.sea; g.fillRect(0, 0, W, H);
+  let y = P + 56;
+  text(b.name, P, y, 56, C.ink, 800); y += 64;
+  text(stops.length ? (relative ? total + '泊の旅' : label(start) + '〜' + label(cur) + '・' + total + '泊') : '', P, y, 30, C.muted); y += 40;
+
+  // 地図
+  const mx = P, my = y, mw = W - P * 2;
+  g.save(); round(mx, my, mw, mapH, 28); g.clip(); g.fillStyle = C.sea; g.fillRect(mx, my, mw, mapH);
+  const COS = Math.cos(36 * Math.PI / 180), PX = (l: number) => (l - 122.5) * COS * 100, PY = (l: number) => (45.8 - l) * 100;
+  const pts = stops.filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number') as unknown as (Data & { lat: number; lng: number; arrive?: string })[];
+  if (pts.length) {
+    const xs = pts.map((s) => PX(s.lng)), ys = pts.map((s) => PY(s.lat));
+    let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const span = Math.max(x1 - x0, (y1 - y0) * mw / mapH, 160); const spanY = span * mapH / mw;
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2; const pad = 1.18;
+    const k = mw / (span * pad); x0 = cx - span * pad / 2; y0 = cy - spanY * pad / 2;
+    g.translate(mx - x0 * k, my - y0 * k); g.scale(k, k);
+    g.fillStyle = C.land; g.strokeStyle = C.line; g.lineWidth = 1.2 / k;
+    if (geo) Object.values(geo).forEach((d) => { if (d) { const p2 = new Path2D(d); g.fill(p2); g.stroke(p2); } });
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], c = pts[i], m = c.arrive || 'car';
+      g.beginPath(); g.moveTo(PX(a.lng), PY(a.lat)); g.lineTo(PX(c.lng), PY(c.lat));
+      g.strokeStyle = m === 'ship' ? C.ship : m === 'plane' ? C.plane : C.road; g.lineWidth = 5 / k; g.lineCap = 'round';
+      g.setLineDash(m === 'ship' ? [12 / k, 9 / k] : m === 'plane' ? [2 / k, 10 / k] : []); g.stroke();
+    }
+    g.setLineDash([]);
+    pts.forEach((s) => { g.beginPath(); g.arc(PX(s.lng), PY(s.lat), 11 / k, 0, Math.PI * 2); g.fillStyle = C.road; g.fill(); g.lineWidth = 4 / k; g.strokeStyle = C.land; g.stroke(); });
+  }
+  g.restore();
+  y = my + mapH + 40;
+
+  // 数字
+  round(P, y, W - P * 2, 150, 24); g.fillStyle = C.card; g.fill();
+  const stat = (i: number, n: number, lab: string, val: string) => { const cw = (W - P * 2) / n; const x = P + cw * i + 36; text(lab, x, y + 56, 26, C.muted, 400, cw - 40); text(val, x, y + 112, 50, C.ink, 800, cw - 40); };
+  const stats: [string, string][] = [['泊数', total + '泊'], ['泊まった所', stops.length + 'か所']];
+  if (items) stats.push(['やりたいこと', dn + ' / ' + items]);
+  stats.forEach(([l, v], i) => stat(i, stats.length, l, v));
+  y += 150 + 70;
+
+  // 行程
+  text('行程', P, y - 16, 34, C.ink, 800);
+  round(P, y, W - P * 2, rows.length * ROW + (stops.length > MAX_ROWS ? ROW : 0) + 16, 24); g.fillStyle = C.card; g.fill();
+  y += 8;
+  rows.forEach((s, i) => {
+    const ry = y + i * ROW;
+    if (i) { g.fillStyle = C.line; g.fillRect(P + 28, ry, W - P * 2 - 56, 1); }
+    text(label(s.s), P + 28, ry + 42, 26, C.muted, 400, 200);
+    const pw = text(String(s.place || ''), P + 250, ry + 42, 30, C.ink, 700, 430);
+    text(String(s.pref || '') + '・' + s.n + '泊', P + 250 + pw + 16, ry + 42, 24, C.muted, 400, W - P * 2 - 250 - pw - 60);
+  });
+  if (stops.length > MAX_ROWS) text('ほか ' + (stops.length - MAX_ROWS) + 'か所', P + 250, y + rows.length * ROW + 42, 26, C.muted);
+  y += rows.length * ROW + (stops.length > MAX_ROWS ? ROW : 0) + 8 + 40;
+
+  // 写真（正方形に切り抜いて並べる）
+  if (imgs.length) {
+    const cols = 2, gap = 20, cell = (W - P * 2 - gap) / cols;
+    imgs.forEach((im, i) => {
+      const x = P + (i % cols) * (cell + gap), yy = y + Math.floor(i / cols) * (cell + gap);
+      const s = Math.min(im.width, im.height);
+      g.save(); round(x, yy, cell, cell, 20); g.clip();
+      g.drawImage(im, (im.width - s) / 2, (im.height - s) / 2, s, s, x, yy, cell, cell); g.restore(); im.close();
+    });
+    y += (imgs.length <= 2 ? cell : cell * 2 + gap) + 40;
+  }
+  text('旅帳でまとめました　' + appUrl.replace(/^https?:\/\//, ''), P, H - 56, 24, C.muted);
+  return await new Promise<Blob>((ok, ng) => cv.toBlob((bl) => (bl ? ok(bl) : ng(new Error('画像を作れませんでした'))), 'image/png'));
+}
