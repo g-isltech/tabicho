@@ -1,6 +1,8 @@
 
 // 画面の本体。アーティファクト版の旅帳から移したもの。
 // データは ctx.db（端末内のストア）と ctx.assets（写真）を通して読み書きする。
+import { PX, PY, FULL, routeBox } from './geo';
+
 export function startApp(ctx) {
   // ---------- 定数 ----------
   const REG = [
@@ -45,12 +47,9 @@ export function startApp(ctx) {
     { id: 'wish', label: 'やりたい', icon: '<path d="M4 12l5 5L20 6"/>' },
     { id: 'diary', label: '日記', icon: '<path d="M5 3h11l3 3v15H5z"/><path d="M9 9h6M9 13h6M9 17h4"/>' }
   ];
-  const COS = Math.cos(36 * Math.PI / 180);
-  const PX = (lng) => (lng - 122.5) * COS * 100;
-  const PY = (lat) => (45.8 - lat) * 100;
-  const FULL = { x: 0, y: 0, w: 1901, h: 2180 };
+  // 'route' は泊まる場所がすべて入る範囲。最初はこれで表示する
   const ZONES = [
-    ['全体', null], ['北海道', [139.3, 146, 41.2, 45.6]], ['東北', [139.0, 142.4, 36.8, 41.7]], ['関東・中部', [135.8, 141.0, 34.4, 38.0]],
+    ['ルート', 'route'], ['全体', null], ['北海道', [139.3, 146, 41.2, 45.6]], ['東北', [139.0, 142.4, 36.8, 41.7]], ['関東・中部', [135.8, 141.0, 34.4, 38.0]],
     ['近畿', [134.2, 137.0, 33.3, 35.9]], ['中国・四国', [130.8, 134.8, 32.6, 35.8]], ['九州', [128.8, 132.3, 30.1, 34.4]], ['奄美・沖縄', [123.6, 130.2, 24.0, 28.8]]
   ];
 
@@ -59,9 +58,9 @@ export function startApp(ctx) {
     stops: [], wishPrefs: {}, done: {}, bookings: [], expenses: [], diary: {},
     trip: { start: '' }, budget: null,
     loaded: { stops: false, wishes: false, bookings: false, expenses: false },
-    db: null, assets: null, me: '', live: false
+    db: null, assets: null, me: ''
   };
-  const UI = { view: 'map', zone: 0, vb: { ...FULL }, sel: null, wishPref: null, wishKind: 'all', hideDone: false,
+  const UI = { view: 'map', zone: 0, panned: false, vb: { ...FULL }, sel: null, wishPref: null, wishKind: 'all', hideDone: false,
     bookFilter: 'all', expAll: false, diaryDate: null, geo: null };
   try { const s = JSON.parse(localStorage.getItem('tabicho-ui') || '{}'); if (s.hideDone) UI.hideDone = true; } catch (e) {}
 
@@ -133,8 +132,6 @@ export function startApp(ctx) {
     else if (ti.phase === 'before') st.textContent = '出発まであと' + dayDiff(ti.t, ti.start) + '日・' + mdw(ti.start) + ' ' + (sch[0] ? sch[0].place + '発・' : '') + ti.total + '泊';
     else if (ti.phase === 'during') st.textContent = (ti.day) + '日目 / ' + ti.total + '泊・今夜は' + (ti.cur ? ti.cur.place : '');
     else st.textContent = '旅は' + mdw(ti.end) + 'に終わりました・' + ti.total + '泊';
-    $('#syncdot').className = 'dot' + (S.live ? ' on' : '');
-    $('#synctext').textContent = S.live ? 'この端末に保存' : '準備中';
     const shown = VIEWS.filter((v) => !(ctx.hidden || []).includes(v.id));
     $('#tabs').style.gridTemplateColumns = 'repeat(' + shown.length + ',minmax(0,1fr))';
     $('#tabs').innerHTML = shown.map((v) => '<a class="tab" href="#' + v.id + '"' + (UI.view === v.id ? ' aria-current="page"' : '') + '>' + icon(v.icon) + '<span>' + v.label + '</span></a>').join('');
@@ -194,14 +191,14 @@ export function startApp(ctx) {
       const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (ptrs.size === 1) {
         travel += Math.hypot(e.clientX - prev.x, e.clientY - prev.y);
-        if (travel > 6 && !UI.moved) { UI.moved = true; try { svg.setPointerCapture(e.pointerId); } catch (er) {} }
+        if (travel > 6 && !UI.moved) { UI.moved = true; UI.panned = true; try { svg.setPointerCapture(e.pointerId); } catch (er) {} }
         if (!UI.moved) return;
         const k = Math.max(UI.vb.w / svg.clientWidth, UI.vb.h / svg.clientHeight);
         UI.vb.x -= (e.clientX - prev.x) * k; UI.vb.y -= (e.clientY - prev.y) * k; applyVB();
       } else if (ptrs.size === 2) {
         const [a, b] = [...ptrs.values()]; const dist = Math.hypot(a.x - b.x, a.y - b.y);
         if (last) zoomAt(last / dist, (a.x + b.x) / 2, (a.y + b.y) / 2);
-        last = dist; UI.moved = true;
+        last = dist; UI.moved = true; UI.panned = true;
       }
     });
     const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) last = null; };
@@ -221,11 +218,13 @@ export function startApp(ctx) {
     const ox = (r.width - UI.vb.w / k) / 2, oy = (r.height - UI.vb.h / k) / 2;
     const mx = UI.vb.x + (cx - r.left - ox) * k, my = UI.vb.y + (cy - r.top - oy) * k;
     const nw = Math.min(Math.max(UI.vb.w * f, 120), FULL.w * 1.4), nh = nw * UI.vb.h / UI.vb.w;
+    UI.panned = true;
     UI.vb.x = mx - (mx - UI.vb.x) * nw / UI.vb.w; UI.vb.y = my - (my - UI.vb.y) * nh / UI.vb.h; UI.vb.w = nw; UI.vb.h = nh; applyVB();
   }
   function setZone(i) {
-    UI.zone = i; const z = ZONES[i][1];
-    if (!z) UI.vb = { ...FULL };
+    UI.zone = i; UI.panned = false; const z = ZONES[i][1];
+    if (z === 'route') UI.vb = routeBox(S.stops);
+    else if (!z) UI.vb = { ...FULL };
     else { const x0 = PX(z[0]), x1 = PX(z[1]), y0 = PY(z[3]), y1 = PY(z[2]); UI.vb = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; }
     document.querySelectorAll('[data-zone]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.zone === i)));
     applyVB();
@@ -239,6 +238,11 @@ export function startApp(ctx) {
   function updateMap(sch, ti) {
     const gp = $('#g-pref'); if (!gp) return;
     if (UI.geo && !gp.childElementCount) initGeoPaths();
+    // 「ルート」を表示していて、自分で動かしていなければ、行程が変わるたびに範囲を合わせ直す
+    if (UI.zone === 0 && !UI.panned) {
+      UI.vb = routeBox(sch);
+      $('#mapsvg').setAttribute('viewBox', [UI.vb.x, UI.vb.y, UI.vb.w, UI.vb.h].map((n) => n.toFixed(1)).join(' '));
+    }
     gp.querySelectorAll('path').forEach((p) => {
       const v = prefPct(p.dataset.code);
       p.setAttribute('style', v ? 'fill:var(--road-soft);fill:color-mix(in srgb,var(--road) ' + Math.round(8 + v * 55) + '%,var(--land))' : 'fill:var(--land)');
@@ -929,7 +933,7 @@ export function startApp(ctx) {
       order: num(o.order), cost: Math.max(0, num(o.cost)), ...(coord(o.lat) !== undefined && coord(o.lng) !== undefined ? { lat: o.lat, lng: o.lng } : { lat: undefined, lng: undefined }),
       kind: KIND[o.kind] ? o.kind : 'T', booking: BOOK[o.booking] ? o.booking : 'none', arrive: ['car', 'ship', 'plane'].includes(o.arrive) ? o.arrive : 'car' });
     const normMoney = (o) => ({ ...o, amount: Math.max(0, num(o.amount)), date: /^\d{4}-\d{2}-\d{2}$/.test(str(o.date)) ? o.date : '' });
-    db.collection('stops').onSnapshot((s) => { S.stops = map(s).map(normStop).sort((a, b) => (a.order || 0) - (b.order || 0)); S.loaded.stops = true; S.live = true; render(); });
+    db.collection('stops').onSnapshot((s) => { S.stops = map(s).map(normStop).sort((a, b) => (a.order || 0) - (b.order || 0)); S.loaded.stops = true; render(); });
     db.collection('wishes').onSnapshot((s) => { const o = {}; s.docs.forEach((d) => { const v = d.data(); if (v && /^\d{2}$/.test(str(v.code))) o[v.code] = { ...v, pref: str(v.pref), items: Array.isArray(v.items) ? v.items.filter((w) => w && typeof w.id === 'string').map((w) => ({ ...w, n: str(w.n), d: str(w.d), k: w.k === 'eat' ? 'eat' : 'see' })) : [] }; }); S.wishPrefs = o; S.loaded.wishes = true; render(); });
     db.collection('wishdone').onSnapshot((s) => { const o = {}; s.docs.forEach((d) => { o[d.id] = d.data() || { done: true }; }); S.done = o; render(); });
     db.collection('bookings').onSnapshot((s) => { S.bookings = map(s).map(normMoney).map((b) => ({ ...b, title: str(b.title), kind: str(b.kind), memo: str(b.memo), stopId: str(b.stopId), status: BOOK[b.status] ? b.status : 'none' })); S.loaded.bookings = true; render(); });

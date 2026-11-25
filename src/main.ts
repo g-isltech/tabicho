@@ -98,6 +98,8 @@ async function doImport(files: File | File[]): Promise<void> {
       docs += r.docs; ph += r.photos; tripIds.push(...r.tripIds);
     } catch (e) { toast((list.length > 1 ? (i + 1) + 'つ目: ' : '') + (e instanceof Error ? e.message : '読み込めませんでした')); return; }
   }
+  // 読み込んだばかりのデータは、もとのファイルが控えになっているので、書き出しの注意はしばらく出さない
+  try { await store.setSetting('lastExport', Date.now()); } catch { /* 覚えられなくても続ける */ }
   // 読み込んだ旅を表示する。今までの旅は残るので、設定から切り替えたり消したりできる
   if (tripIds.length) await store.setSetting('currentTrip', tripIds[0]);
   const name = tripIds.length ? String(store.read('trips/' + tripIds[0])?.name || '') : '';
@@ -244,7 +246,7 @@ function onboarding(): void {
     '<label class="f">旅の名前<input class="i" id="ob-name" required placeholder="例: 日本一周 2027" value="日本一周"></label>' +
     '<label class="f">出発日<input class="i" id="ob-start" type="date" required value="' + todayIso() + '"></label>' +
     '<button class="btn primary" type="submit">旅を作る</button></form>' +
-    '<div class="setting-row"><span class="grow">まずは使い方を見てみたいとき<br><span class="sub">北海道を11泊でめぐる、架空の旅が入ります</span></span><button class="btn" type="button" id="ob-sample">サンプルの旅で試す</button></div>' +
+    '<div class="setting-row"><span class="grow">まずは使い方を見てみたいとき<br><span class="sub">長崎から五島列島を9泊でめぐる、架空の旅が入ります</span></span><button class="btn" type="button" id="ob-sample">サンプルの旅で試す</button></div>' +
     '<p class="sub" style="margin:0">サンプルのファイルは <a href="' + import.meta.env.BASE_URL + 'sample-trip.zip" download="tabicho-sample.zip">ここからダウンロード</a> できます。書き出したファイルの形の見本にもなります。</p>' +
     '<div class="setting-row"><span class="sub">前に書き出したファイルや、一緒に行く人からもらったファイルがあるとき</span><label class="btn" for="ob-file">ファイルから読み込む</label><input type="file" id="ob-file" accept=".zip,application/zip" multiple hidden></div>' +
     '<p class="sub">スマホでは、ブラウザの「ホーム画面に追加」をしてから使ってください。追加しないと、しばらく使わないうちにデータが消えることがあります。</p></section>';
@@ -280,7 +282,7 @@ async function settings(current: Trip): Promise<void> {
     '<div class="setting-row"><span class="grow">すべての旅と写真をまとめて書き出します<br><span class="sub">端末が壊れたときのための控えです。最後に書き出した日: ' + (last ? new Date(last).toLocaleDateString('ja-JP') : 'まだありません') + '</span></span><button class="btn" type="button" id="st-export">すべて書き出す</button></div>' +
     '<div class="setting-row"><span class="grow">すべての旅のデータだけを書き出します（写真なし）<br><span class="sub">ファイルが小さいので、毎日でも気軽に控えを取れます。写真が多いときは、写真入りの書き出しと組み合わせてください</span></span><button class="btn" type="button" id="st-export-data">データだけ書き出す</button></div>' +
     '<div class="setting-row"><span class="grow">書き出したファイルを読み込みます。入っていた旅が増えます。同じ旅は新しい方を残します<br><span class="sub">いくつかに分けて書き出したときは、全部のファイルをまとめて選んでください</span></span><label class="btn" for="st-file">読み込む</label><input type="file" id="st-file" accept=".zip,application/zip" multiple hidden></div>' +
-    '<div class="setting-row"><span class="grow">使い方を試せるサンプルの旅（北海道・11泊）を追加します</span><button class="btn" type="button" id="st-sample">サンプルを追加</button></div></section>' +
+    '<div class="setting-row"><span class="grow">使い方を試せるサンプルの旅（五島列島・9泊）を追加します</span><button class="btn" type="button" id="st-sample">サンプルを追加</button></div></section>' +
     '<section style="display:flex;flex-direction:column;gap:4px"><h3>この端末の保存</h3>' +
     '<p class="sub">データはこの端末のブラウザの中だけにあり、どこにも送りません。地名で場所を探すときだけ、探す言葉を国土地理院の検索サービスに送ります。</p>' +
     '<p class="sub">消えにくい保存: ' + (persisted === true ? '有効' : persisted === false ? '無効（ホーム画面に追加すると有効になりやすくなります）' : '不明') + (usage ? '・使っている容量: ' + usage : '') + '</p></section>' +
@@ -352,7 +354,8 @@ async function boot(): Promise<void> {
   const last = await store.getSetting<number>('lastExport');
   const hasData = store.list('trips/' + tid + '/stops').length > 0;
   const curDoc = store.read('trips/' + tid) || {};
-  if (hasData && !curDoc.readonly && (!last || Date.now() - last > REMIND_DAYS * 86400000)) {
+  // もらった旅とサンプルの旅は、書き出しの注意を出さない
+  if (hasData && !curDoc.readonly && !curDoc.sample && (!last || Date.now() - last > REMIND_DAYS * 86400000)) {
     const b = document.createElement('div');
     b.id = 'export-banner'; b.className = 'banner row export-banner';
     b.innerHTML = '<span class="grow">' + (last ? REMIND_DAYS + '日以上書き出していません' : 'まだ一度も書き出していません') + '。端末が壊れたときのために、ときどき書き出してください</span><button class="btn small" type="button" id="banner-export">今書き出す</button>';

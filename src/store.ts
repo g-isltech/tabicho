@@ -1,6 +1,6 @@
 // 端末内（IndexedDB）に保存するデータストア。
 // 画面側のコードはアーティファクト版の db（doc / collection / onSnapshot）と同じ形で呼べるようにしてある。
-// 消したデータも「deleted」として残す。あとで Google ドライブと同期するとき、どちらで消したかを比べるため。
+// 消したデータも「deleted」として残す。書き出したファイルを読み込むとき、消したものが生き返らないようにするため。
 import { openDB, type IDBPDatabase } from 'idb';
 
 export type Data = Record<string, unknown>;
@@ -70,7 +70,7 @@ export class Store {
     return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
-  /** 全件（消した印のものも含む）。書き出しと同期に使う */
+  /** 全件（消した印のものも含む）。書き出しに使う */
   allRecords(): DocRecord[] { return [...this.docs.values()]; }
 
   async write(path: string, data: Data | null, updatedAt = Date.now()): Promise<void> {

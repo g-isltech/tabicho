@@ -41,9 +41,6 @@ button{cursor:pointer}
 .shield{flex-shrink:0;width:34px;height:34px;border-radius:9px 9px 14px 14px;background:var(--road);color:var(--road-ink);display:grid;place-items:center;font-weight:900;font-size:13px;letter-spacing:.02em}
 .brand h1{margin:0;font-size:17px;font-weight:900;line-height:1.2}
 .brand p{margin:0;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sync{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--plane)}
-.dot.on{background:var(--ok)}
 
 main{flex:1;width:100%;max-width:960px;margin:0 auto;
   padding-block:16px calc(84px + env(safe-area-inset-bottom,0px));
@@ -207,7 +204,6 @@ body.no-tabs .tabs{display:none}
 .dd{min-width:44px}
 .stop .t strong,.wish .n,.entry-text,.stop .w{overflow-wrap:anywhere}
 @media (max-width:480px){
-  #synctext{display:none}
   .dd .wide{display:none}
   .grid2{grid-template-columns:minmax(0,1fr)}
   .grid2.keep{grid-template-columns:repeat(2,minmax(0,1fr))}

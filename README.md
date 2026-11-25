@@ -17,23 +17,28 @@ npm ci
 npm run dev      # 開発用サーバー
 npm run build    # 型チェックとビルド（dist/ に出力）
 npm run preview  # ビルドしたものを確認
+npm test         # 自動テスト（vitest）
 ```
 
 - TypeScript + Vite。画面の本体（`src/app.js`）は試作版から移したもので、これから少しずつ TypeScript に置き換える
-- `src/store.ts`: 端末内の保存（IndexedDB）。消したデータも「消した印」を付けて残す（あとでドライブと同期するため）
+- `src/store.ts`: 端末内の保存（IndexedDB）。消したデータも「消した印」を付けて残す（読み込んだファイルで、消したものが生き返らないようにするため）
 - `src/photos.ts`: 写真の縮小と保存
-- `src/backup.ts`: zip の書き出し・読み込み
+- `src/backup.ts`: zip の書き出し・読み込み（100MB ごとに分ける）
+- `src/share.ts`: 旅の記録を人に見せる共有（まとめ画像・見るだけのページ・旅帳で開けるファイル）
+- `src/geo.ts`: 地図の座標の計算（ルートに合わせた表示範囲、共有での座標の丸め）
+- `scripts/make-sample.mjs`: サンプルの旅（`public/sample-trip.zip`）を作る
+- `tests/`: 自動テスト。IndexedDB は fake-indexeddb で置き換えて動かす
 - `public/japan.json`: 都道府県の形（地球地図日本（国土地理院）を加工）
 
 ## 公開
 
-`main` に push すると、GitHub Actions がビルドして GitHub Pages に公開します（`.github/workflows/deploy.yml`）。
+`main` に push すると、GitHub Actions がテストとビルドをして GitHub Pages に公開します（`.github/workflows/deploy.yml`）。
 初回だけ、リポジトリの Settings → Pages → Build and deployment の Source を「GitHub Actions」にする必要があります。
 
 ## これからやること
 
-1. ~~端末内の保存だけで動く版~~（この版）
-2. Google ドライブでの共有（夫婦など2人で同じ旅を編集する）
+1. ~~端末内の保存だけで動く版~~
+2. ~~旅の記録を人に見せる共有~~
 3. 一般公開の準備（プライバシーポリシーなど）
 
 ## 出典

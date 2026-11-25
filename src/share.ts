@@ -5,6 +5,7 @@
 // メモ・予約番号など、共有に向かないものは選べないようにして、最初から入れない。
 import JSZip from 'jszip';
 import { newId, type Data, type DocRecord, type Store } from './store';
+import { PX, PY, roundCoord } from './geo';
 
 export interface ShareOptions {
   diary: boolean; // 日記の文章
@@ -61,7 +62,13 @@ export function buildShare(store: Store, tid: string, opt: ShareOptions): ShareB
     if (opt.lodgingNames) keep.push('lodgingName');
     if (opt.bookings) keep.push('booking');
     if (opt.money) keep.push('cost');
-    add(dst + 'stops/' + r.id, pick(s, keep));
+    const stop = pick(s, keep);
+    // 宿の名前を見せないときは、座標も丸めて、宿や知人宅の場所が分からないようにする
+    if (!opt.lodgingNames) {
+      if (typeof stop.lat === 'number') stop.lat = roundCoord(stop.lat);
+      if (typeof stop.lng === 'number') stop.lng = roundCoord(stop.lng);
+    }
+    add(dst + 'stops/' + r.id, stop);
   }
   if (opt.bookings) {
     for (const r of store.list(src + 'bookings')) {
@@ -73,7 +80,8 @@ export function buildShare(store: Store, tid: string, opt: ShareOptions): ShareB
   if (opt.money) {
     add(dst + 'meta/budget', store.read(src + 'meta/budget') || {});
     for (const r of store.list(src + 'expenses')) {
-      const e = pick(r.data, ['amount', 'cat', 'memo', 'at']);
+      // 出費のメモは見せない（メモは共有に入れない約束）
+      const e = pick(r.data, ['amount', 'cat', 'at']);
       e.date = r.data?.date ? shift(String(r.data.date)) : start;
       add(dst + 'expenses/' + r.id, e);
     }
@@ -152,7 +160,6 @@ function renderViewer(D: ViewData, G: Record<string, string>): string {
   const label = (d: Date) => (D.relative ? (dayDiff(start, d) + 1) + '日目' : (d.getMonth() + 1) + '/' + d.getDate() + '（' + WD[d.getDay()] + '）');
   let cur = start, total = 0;
   const stops = D.stops.map((s) => { const a = cur; const n = Number(s.nights) || 0; cur = add(cur, n); total += n; return { ...s, s: a, n } as Data & { id: string; s: Date; n: number }; });
-  const COS = Math.cos(36 * Math.PI / 180), PX = (l: number) => (l - 122.5) * COS * 100, PY = (l: number) => (45.8 - l) * 100;
   const pts = stops.filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number') as (typeof stops[number] & { lat: number; lng: number })[];
   let h = '<header><h1>' + esc(D.name) + '</h1><p class="sub">' + (stops.length ? (D.relative ? total + '泊の旅' : label(start) + '〜' + label(cur) + '・' + total + '泊') : '') + '</p></header>';
   let items = 0, dn = 0; D.wishes.forEach((p) => ((p.items as Data[]) || []).forEach((w) => { items++; if (D.done.includes(String(w.id))) dn++; }));
@@ -163,7 +170,6 @@ function renderViewer(D: ViewData, G: Record<string, string>): string {
     const vb = [x0 - pad - (w - (x1 - x0)) / 2, y0 - pad - (hh - (y1 - y0)) / 2, w + pad * 2, hh + pad * 2];
     const u = vb[2] / 800, f = (n: number) => n.toFixed(1);
     let svg = '<svg viewBox="' + vb.map(f).join(' ') + '" role="img" aria-label="旅のルートの地図">';
-    // 表示する範囲に入る県だけを描く（ファイルを小さくするため）
     Object.keys(G).forEach((k) => { if (G[k]) svg += '<path d="' + G[k] + '" fill="#FBFBF8" stroke="#D5DDE0" stroke-width="' + f(u) + '"/>'; });
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], c = pts[i], m = String(c.arrive || 'car');
@@ -291,7 +297,6 @@ export async function shareImage(store: Store, b: ShareBuild, geo: Record<string
   // 地図
   const mx = P, my = 320, mw = W - P * 2, mh = 820;
   g.save(); round(mx, my, mw, mh, 40); g.clip(); g.fillStyle = C.panel; g.fillRect(mx, my, mw, mh);
-  const COS = Math.cos(36 * Math.PI / 180), PX = (l: number) => (l - 122.5) * COS * 100, PY = (l: number) => (45.8 - l) * 100;
   const pts = stops.filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number') as unknown as (Data & { lat: number; lng: number; arrive?: string })[];
   if (pts.length || geo) {
     const xs = pts.length ? pts.map((s) => PX(s.lng)) : [0, 1901], ys = pts.length ? pts.map((s) => PY(s.lat)) : [0, 2180];
