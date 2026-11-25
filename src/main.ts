@@ -2,7 +2,7 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Store, scopedDb, newId } from './store';
 import { Photos } from './photos';
-import { exportZip, importZip, saveFile } from './backup';
+import { planExport, buildPart, importZip, saveFile, type ExportPlan } from './backup';
 import { startApp } from './app.js';
 import { buildShare, shareZip, shareHtml, shareImage, DEFAULT_SHARE, type ShareOptions } from './share';
 
@@ -49,35 +49,60 @@ function toast(msg: string): void {
 }
 
 // zip を作るのに時間がかかるので、作り終えてから「保存する」をもう一度押してもらう（共有シートはボタンを押した直後にしか開けないため）
-// tripId を渡すとその旅だけ、渡さないとすべての旅を書き出す
-async function doExport(tripId?: string): Promise<void> {
-  let blob: Blob;
-  try { toast('書き出す準備をしています'); blob = await exportZip(store, tripId); }
+// tripId を渡すとその旅だけ、渡さないとすべての旅を書き出す。withPhotos が false なら「データだけ」。
+// 写真が多いときは、1つ100MB までのファイルに分ける。メモリを使いすぎないよう、1つずつ作って保存する
+async function doExport(tripId?: string, withPhotos = true): Promise<void> {
+  let plan: ExportPlan;
+  try { toast('書き出す準備をしています'); plan = await planExport(store, tripId, withPhotos); }
   catch (e) { toast('書き出せませんでした'); console.error(e); return; }
+  const total = plan.parts.length;
   const tripName = tripId ? String(store.read('trips/' + tripId)?.name || '旅') : '';
   // ファイル名に日本語を使うと、ブラウザによっては名前が消えるので英数字にする（旅の名前はファイルの中に入っている）
-  const name = 'tabicho-' + (tripId ? 'trip' : 'all') + '-' + todayIso().replace(/-/g, '') + '.zip';
-  sheet('<h2>書き出す準備ができました</h2><p style="margin:0">' + (tripId ? '「' + esc(tripName) + '」だけ' : 'すべての旅') + '・' + esc(name) + '（' + (blob.size / 1024 / 1024).toFixed(1) + 'MB）</p>' +
-    '<p class="sub">iPhone では、開いた画面で「\"ファイル\"に保存」を選んでください。iCloud Drive などに置いておくと、機種変更のときも安心です。</p>' +
-    '<div class="row"><button class="btn primary grow" type="button" id="ex-save">保存する</button><button class="btn" type="button" data-close>やめる</button></div>');
-  $('#ex-save')!.addEventListener('click', async () => {
-    const r = await saveFile(blob, name);
-    if (r === 'cancelled') return;
-    if (!tripId) await store.setSetting('lastExport', Date.now());
-    closeSheet(); toast('書き出しました');
-    $('#export-banner')?.remove();
-  });
+  const base = 'tabicho-' + (withPhotos ? (tripId ? 'trip' : 'all') : 'data') + '-' + todayIso().replace(/-/g, '');
+  const nameOf = (i: number) => base + (total > 1 ? '-' + (i + 1) + 'of' + total : '') + '.zip';
+  const mb = (n: number) => (n / 1024 / 1024).toFixed(1) + 'MB';
+  const what = (tripId ? '「' + esc(tripName) + '」だけ' : 'すべての旅') + (withPhotos ? '' : '・写真なし');
+  let i = 0;
+  const step = async () => {
+    // 1つずつ作る（前のファイルは保存したら手放す）
+    sheet('<h2>書き出しています</h2><p style="margin:0">' + what + (total > 1 ? '・' + (i + 1) + ' / ' + total + ' つ目を作っています' : '') + '</p>');
+    let blob: Blob;
+    try { blob = await buildPart(store, plan, i); } catch (e) { console.error(e); closeSheet(); toast('書き出せませんでした'); return; }
+    const p = plan.parts[i];
+    sheet('<h2>' + (total > 1 ? (i + 1) + ' / ' + total + ' つ目の準備ができました' : '書き出す準備ができました') + '</h2>' +
+      '<p style="margin:0">' + what + '・' + esc(nameOf(i)) + '（' + mb(blob.size) + '）</p>' +
+      (total > 1 ? '<p class="sub" style="margin:0">' + (i === 0 ? 'データと' : '') + '写真' + p.photoIds.length + '枚が入っています。写真が多いので、' + total + 'つのファイルに分けて保存します。読み込むときは、全部のファイルを読み込んでください</p>' : '') +
+      '<p class="sub">iPhone では、開いた画面で「\"ファイル\"に保存」を選んでください。iCloud Drive などに置いておくと、機種変更のときも安心です。</p>' +
+      '<div class="row"><button class="btn primary grow" type="button" id="ex-save">保存する</button><button class="btn" type="button" data-close>やめる</button></div>');
+    $('#ex-save')!.addEventListener('click', async () => {
+      const r = await saveFile(blob, nameOf(i));
+      if (r === 'cancelled') return;
+      i++;
+      if (i < total) { step(); return; }
+      if (!tripId) await store.setSetting('lastExport', Date.now());
+      closeSheet(); toast(total > 1 ? total + 'つのファイルに書き出しました' : '書き出しました');
+      $('#export-banner')?.remove();
+    });
+  };
+  step();
 }
 
-async function doImport(file: File): Promise<void> {
-  try {
-    const r = await importZip(store, file);
-    // 読み込んだ旅を表示する。今までの旅は残るので、設定から切り替えたり消したりできる
-    if (r.tripIds.length) await store.setSetting('currentTrip', r.tripIds[0]);
-    const name = r.tripIds.length ? String(store.read('trips/' + r.tripIds[0])?.name || '') : '';
-    toast(name ? '「' + name + '」を読み込みました。今までの旅は設定から切り替えられます' : '読み込みました（データ' + r.docs + '件・写真' + r.photos + '枚）');
-    setTimeout(() => location.reload(), 1600);
-  } catch (e) { toast(e instanceof Error ? e.message : '読み込めませんでした'); }
+// いくつかのファイルを順に読み込む（分けて書き出したものは、全部まとめて選んでもらう）。1つずつ読むので、メモリを使いすぎない
+async function doImport(files: File | File[]): Promise<void> {
+  const list = Array.isArray(files) ? files : [files];
+  let docs = 0, ph = 0; const tripIds: string[] = [];
+  for (let i = 0; i < list.length; i++) {
+    try {
+      if (list.length > 1) toast('読み込んでいます（' + (i + 1) + ' / ' + list.length + '）');
+      const r = await importZip(store, list[i]);
+      docs += r.docs; ph += r.photos; tripIds.push(...r.tripIds);
+    } catch (e) { toast((list.length > 1 ? (i + 1) + 'つ目: ' : '') + (e instanceof Error ? e.message : '読み込めませんでした')); return; }
+  }
+  // 読み込んだ旅を表示する。今までの旅は残るので、設定から切り替えたり消したりできる
+  if (tripIds.length) await store.setSetting('currentTrip', tripIds[0]);
+  const name = tripIds.length ? String(store.read('trips/' + tripIds[0])?.name || '') : '';
+  toast(name ? '「' + name + '」を読み込みました（写真' + ph + '枚）。今までの旅は設定から切り替えられます' : '読み込みました（データ' + docs + '件・写真' + ph + '枚）');
+  setTimeout(() => location.reload(), 1600);
 }
 
 // ---------- 旅の記録の共有 ----------
@@ -221,7 +246,7 @@ function onboarding(): void {
     '<button class="btn primary" type="submit">旅を作る</button></form>' +
     '<div class="setting-row"><span class="grow">まずは使い方を見てみたいとき<br><span class="sub">北海道を11泊でめぐる、架空の旅が入ります</span></span><button class="btn" type="button" id="ob-sample">サンプルの旅で試す</button></div>' +
     '<p class="sub" style="margin:0">サンプルのファイルは <a href="' + import.meta.env.BASE_URL + 'sample-trip.zip" download="tabicho-sample.zip">ここからダウンロード</a> できます。書き出したファイルの形の見本にもなります。</p>' +
-    '<div class="setting-row"><span class="sub">前に書き出したファイルや、一緒に行く人からもらったファイルがあるとき</span><label class="btn" for="ob-file">ファイルから読み込む</label><input type="file" id="ob-file" accept=".zip,application/zip" hidden></div>' +
+    '<div class="setting-row"><span class="sub">前に書き出したファイルや、一緒に行く人からもらったファイルがあるとき</span><label class="btn" for="ob-file">ファイルから読み込む</label><input type="file" id="ob-file" accept=".zip,application/zip" multiple hidden></div>' +
     '<p class="sub">スマホでは、ブラウザの「ホーム画面に追加」をしてから使ってください。追加しないと、しばらく使わないうちにデータが消えることがあります。</p></section>';
   $('#ob-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -232,7 +257,7 @@ function onboarding(): void {
     location.hash = '#plan'; location.reload();
   });
   $('#ob-sample')!.addEventListener('click', loadSample);
-  $('#ob-file')!.addEventListener('change', (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) doImport(f); });
+  $('#ob-file')!.addEventListener('change', (e) => { const fs = (e.target as HTMLInputElement).files; if (fs && fs.length) doImport([...fs]); });
 }
 
 // ---------- 設定 ----------
@@ -253,7 +278,8 @@ async function settings(current: Trip): Promise<void> {
     '<section style="display:flex;flex-direction:column;gap:4px"><h3>書き出しと読み込み</h3>' +
     '<div class="setting-row"><span class="grow">表示中の旅「' + esc(current.name) + '」だけを書き出します<br><span class="sub">一緒に行く人に渡すときに使います。渡された人は「読み込む」で開けます</span></span><button class="btn primary" type="button" id="st-export-one">この旅を書き出す</button></div>' +
     '<div class="setting-row"><span class="grow">すべての旅と写真をまとめて書き出します<br><span class="sub">端末が壊れたときのための控えです。最後に書き出した日: ' + (last ? new Date(last).toLocaleDateString('ja-JP') : 'まだありません') + '</span></span><button class="btn" type="button" id="st-export">すべて書き出す</button></div>' +
-    '<div class="setting-row"><span class="grow">書き出したファイルを読み込みます。入っていた旅が増えます。同じ旅は新しい方を残します</span><label class="btn" for="st-file">読み込む</label><input type="file" id="st-file" accept=".zip,application/zip" hidden></div>' +
+    '<div class="setting-row"><span class="grow">すべての旅のデータだけを書き出します（写真なし）<br><span class="sub">ファイルが小さいので、毎日でも気軽に控えを取れます。写真が多いときは、写真入りの書き出しと組み合わせてください</span></span><button class="btn" type="button" id="st-export-data">データだけ書き出す</button></div>' +
+    '<div class="setting-row"><span class="grow">書き出したファイルを読み込みます。入っていた旅が増えます。同じ旅は新しい方を残します<br><span class="sub">いくつかに分けて書き出したときは、全部のファイルをまとめて選んでください</span></span><label class="btn" for="st-file">読み込む</label><input type="file" id="st-file" accept=".zip,application/zip" multiple hidden></div>' +
     '<div class="setting-row"><span class="grow">使い方を試せるサンプルの旅（北海道・11泊）を追加します</span><button class="btn" type="button" id="st-sample">サンプルを追加</button></div></section>' +
     '<section style="display:flex;flex-direction:column;gap:4px"><h3>この端末の保存</h3>' +
     '<p class="sub">データはこの端末のブラウザの中だけにあり、どこにも送りません。地名で場所を探すときだけ、探す言葉を国土地理院の検索サービスに送ります。</p>' +
@@ -275,11 +301,12 @@ async function settings(current: Trip): Promise<void> {
     await store.setSetting('currentTrip', tid); location.hash = '#plan'; location.reload();
   });
   $('#st-export')!.addEventListener('click', () => doExport());
+  $('#st-export-data')!.addEventListener('click', () => doExport(undefined, false));
   $('#st-share')?.addEventListener('click', () => shareSheet(current));
   $('#st-copy')?.addEventListener('click', () => copyTrip(current));
   $('#st-export-one')!.addEventListener('click', () => doExport(current.id));
   $('#st-sample')!.addEventListener('click', loadSample);
-  $('#st-file')!.addEventListener('change', (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) doImport(f); });
+  $('#st-file')!.addEventListener('change', (e) => { const fs = (e.target as HTMLInputElement).files; if (fs && fs.length) doImport([...fs]); });
   $('#st-del')!.addEventListener('click', () => {
     $('#st-confirm')!.innerHTML = '<div class="banner row"><span class="grow">「' + esc(current.name) + '」の行程・予約・お金・やりたいこと・日記を消します。元に戻せません。先に書き出しておくと安心です</span><button class="btn small danger" type="button" id="st-del2">消す</button></div>';
     $('#st-del2')!.addEventListener('click', async () => {
