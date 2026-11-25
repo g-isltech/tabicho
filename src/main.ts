@@ -135,8 +135,8 @@ async function shareSheet(current: Trip): Promise<void> {
     SHARE_ITEMS.map(([k, label, note]) => '<label class="setting-row" style="cursor:pointer"><span class="grow">' + esc(label) + (note ? '<br><span class="sub">' + esc(note) + '</span>' : '') + '</span><input type="checkbox" data-sh="' + k + '"' + (opt[k] ? ' checked' : '') + ' style="width:24px;height:24px;accent-color:var(--road)"></label>').join('') +
     '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">' +
     '<button class="btn primary" type="button" data-sh-make="png">まとめ画像を作る</button><p class="sub" style="margin:0">地図・行程・写真（4枚まで）を縦長の画像1枚に。LINE やインスタにそのまま送れます</p>' +
-    '<button class="btn" type="button" data-sh-make="html">見るだけのページを作る</button><p class="sub" style="margin:0">HTML ファイル1つ。旅帳を持っていない人も、受け取ってタップすれば見られます</p>' +
-    '<button class="btn" type="button" data-sh-make="zip">旅帳で開けるファイルを作る</button><p class="sub" style="margin:0">受け取った人の旅帳に「もらった旅」として入ります。見るだけで、もとに自分の旅を作れます</p>' +
+    '<button class="btn" type="button" data-sh-make="html">見るだけのページを作る</button><p class="sub" style="margin:0">HTML ファイル1つ。たび帳を持っていない人も、受け取ってタップすれば見られます</p>' +
+    '<button class="btn" type="button" data-sh-make="zip">たび帳で開けるファイルを作る</button><p class="sub" style="margin:0">受け取った人のたび帳に「もらった旅」として入ります。見るだけで、もとに自分の旅を作れます</p>' +
     '<button class="btn" type="button" data-close>やめる</button></div></form>');
   document.querySelectorAll<HTMLButtonElement>('[data-sh-make]').forEach((b) => b.addEventListener('click', async () => {
     document.querySelectorAll<HTMLInputElement>('[data-sh]').forEach((i) => { (opt as unknown as Record<string, boolean>)[i.dataset.sh!] = i.checked; });
@@ -238,10 +238,10 @@ async function loadSample(): Promise<void> {
 // ---------- はじめての画面 ----------
 function onboarding(): void {
   document.body.classList.add('no-tabs');
-  $('#trip-name')!.textContent = '旅帳';
+  $('#trip-name')!.textContent = 'たび帳';
   $('#status')!.textContent = '長い旅の行程・予約・お金・やりたいこと・日記を、地図と一緒に';
   $('#view')!.innerHTML = '<section class="card onboard"><h2>旅を作りましょう</h2>' +
-    '<p style="margin:0">旅帳は、日本一周のような長い旅を管理するアプリです。データはこの端末の中だけに保存され、どこにも送られません。</p>' +
+    '<p style="margin:0">たび帳は、日本一周のような長い旅を管理するアプリです。データはこの端末の中だけに保存され、どこにも送られません。</p>' +
     '<form id="ob-form" style="display:flex;flex-direction:column;gap:12px">' +
     '<label class="f">旅の名前<input class="i" id="ob-name" required placeholder="例: 日本一周 2027" value="日本一周"></label>' +
     '<label class="f">出発日<input class="i" id="ob-start" type="date" required value="' + todayIso() + '"></label>' +
@@ -321,7 +321,7 @@ async function settings(current: Trip): Promise<void> {
 }
 
 // ---------- 起動 ----------
-// 旅帳を2つの画面（タブ）で同時に開いていると、片方の変更をもう片方が知らずに上書きしてしまう。
+// たび帳を2つの画面（タブ）で同時に開いていると、片方の変更をもう片方が知らずに上書きしてしまう。
 // 同じ端末のほかの画面と声をかけ合い、見つけたら注意を出す
 function watchOtherTabs(): void {
   if (!('BroadcastChannel' in window)) return;
@@ -329,7 +329,7 @@ function watchOtherTabs(): void {
   const warn = () => {
     if ($('#tab-warning')) return;
     const b = document.createElement('div'); b.id = 'tab-warning'; b.className = 'banner export-banner'; b.setAttribute('role', 'alert');
-    b.textContent = '旅帳が別の画面（タブやホーム画面のアプリ）でも開いています。両方で書き換えると、片方の変更が消えることがあります。使わない方を閉じてください';
+    b.textContent = 'たび帳が別の画面（タブやホーム画面のアプリ）でも開いています。両方で書き換えると、片方の変更が消えることがあります。使わない方を閉じてください';
     $('#view')!.before(b);
   };
   ch.onmessage = (e) => { const m = e.data || {}; if (m.from === me) return; if (m.type === 'hello') ch.postMessage({ type: 'here', from: me }); if (m.type === 'hello' || m.type === 'here') warn(); };

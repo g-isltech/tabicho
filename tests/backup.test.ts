@@ -63,10 +63,10 @@ describe('書き出しと読み込み', () => {
     expect(Object.keys(zip.files).some((f) => f.endsWith('.jpg'))).toBe(false);
   });
 
-  it('旅帳のファイルでなければ読み込まない', async () => {
+  it('たび帳のファイルでなければ読み込まない', async () => {
     const s = await freshStore();
     const z = new JSZip(); z.file('data.json', JSON.stringify({ format: 'other', records: [] }));
-    await expect(importZip(s, await z.generateAsync({ type: 'blob' }))).rejects.toThrow('旅帳の書き出しファイルではありません');
+    await expect(importZip(s, await z.generateAsync({ type: 'blob' }))).rejects.toThrow('たび帳の書き出しファイルではありません');
     const empty = new JSZip(); empty.file('readme.txt', 'x');
     await expect(importZip(s, await empty.generateAsync({ type: 'blob' }))).rejects.toThrow();
   });

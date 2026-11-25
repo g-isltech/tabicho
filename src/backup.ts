@@ -69,14 +69,14 @@ export async function importZip(store: Store, file: Blob): Promise<ImportResult>
   let docs = 0;
   if (dataFile) {
     const parsed = JSON.parse(await dataFile.async('string')) as { format?: string; version?: number; records?: DocRecord[] };
-    if (parsed.format !== FORMAT || !Array.isArray(parsed.records)) throw new Error('旅帳の書き出しファイルではありません');
+    if (parsed.format !== FORMAT || !Array.isArray(parsed.records)) throw new Error('たび帳の書き出しファイルではありません');
     valid = parsed.records.filter((r) => r && typeof r.path === 'string' && typeof r.updatedAt === 'number');
     docs = await store.merge(valid);
   } else if (partFile) {
     // 写真だけのファイル（分けて書き出したものの2つ目以降）
     const part = JSON.parse(await partFile.async('string')) as { format?: string };
-    if (part.format !== PHOTO_PART) throw new Error('旅帳の書き出しファイルではありません');
-  } else throw new Error('旅帳の書き出しファイルではありません');
+    if (part.format !== PHOTO_PART) throw new Error('たび帳の書き出しファイルではありません');
+  } else throw new Error('たび帳の書き出しファイルではありません');
   let photos = 0;
   const have = new Set(await store.allPhotoIds());
   const files = zip.folder('photos')?.file(/\.jpg$/) || [];

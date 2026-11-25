@@ -1,4 +1,4 @@
-# 旅帳（tabicho）
+# たび帳（tabicho）
 
 日本一周のような長い旅の、行程・予約・お金・やりたいこと・日記を、地図と一緒に管理する Web アプリです。
 
@@ -24,7 +24,7 @@ npm test         # 自動テスト（vitest）
 - `src/store.ts`: 端末内の保存（IndexedDB）。消したデータも「消した印」を付けて残す（読み込んだファイルで、消したものが生き返らないようにするため）
 - `src/photos.ts`: 写真の縮小と保存
 - `src/backup.ts`: zip の書き出し・読み込み（100MB ごとに分ける）
-- `src/share.ts`: 旅の記録を人に見せる共有（まとめ画像・見るだけのページ・旅帳で開けるファイル）
+- `src/share.ts`: 旅の記録を人に見せる共有（まとめ画像・見るだけのページ・たび帳で開けるファイル）
 - `src/geo.ts`: 地図の座標の計算（ルートに合わせた表示範囲、共有での座標の丸め）
 - `scripts/make-sample.mjs`: サンプルの旅（`public/sample-trip.zip`）を作る
 - `tests/`: 自動テスト。IndexedDB は fake-indexeddb で置き換えて動かす

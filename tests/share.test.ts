@@ -50,7 +50,7 @@ describe('旅の記録の共有', () => {
     expect(b.photoIds).toEqual([]);
   });
 
-  it('旅帳で開けるファイルは、受け取った側で「もらった旅」になる', async () => {
+  it('たび帳で開けるファイルは、受け取った側で「もらった旅」になる', async () => {
     const s = await freshStore();
     await makeTrip(s, 't1', { photos: ['p1'] });
     const b = buildShare(s, 't1', DEFAULT_SHARE);

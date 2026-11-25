@@ -1,7 +1,7 @@
 // 旅の記録を人に見せるための共有。
 // 見せる項目を選んで、2つの形で書き出す。
-//   1. 見るだけのページ（HTML ファイル1つ。旅帳がなくても開ける）
-//   2. 旅帳で開ける zip（受け取った側では「もらった旅」として見るだけになる）
+//   1. 見るだけのページ（HTML ファイル1つ。たび帳がなくても開ける）
+//   2. たび帳で開ける zip（受け取った側では「もらった旅」として見るだけになる）
 // メモ・予約番号など、共有に向かないものは選べないようにして、最初から入れない。
 import JSZip from 'jszip';
 import { newId, type Data, type DocRecord, type Store } from './store';
@@ -35,7 +35,7 @@ export interface ShareBuild {
   name: string;
 }
 
-/** 共有用のデータを作る。旅帳で開ける形（DocRecord）で返す */
+/** 共有用のデータを作る。たび帳で開ける形（DocRecord）で返す */
 export function buildShare(store: Store, tid: string, opt: ShareOptions): ShareBuild {
   const src = 'trips/' + tid + '/';
   const newTid = 's' + newId();
@@ -112,7 +112,7 @@ export function buildShare(store: Store, tid: string, opt: ShareOptions): ShareB
   return { records, photoIds, tripId: newTid, name };
 }
 
-/** 旅帳で開ける zip */
+/** たび帳で開ける zip */
 export async function shareZip(store: Store, b: ShareBuild): Promise<Blob> {
   const zip = new JSZip();
   zip.file('data.json', JSON.stringify({ format: 'tabicho-backup', version: 1, exportedAt: new Date().toISOString(), shared: true, records: b.records }));
@@ -201,7 +201,7 @@ function renderViewer(D: ViewData, G: Record<string, string>): string {
     h += '<section class="card"><h2>お金</h2><div class="row"><span>使った額</span><b>' + yen(all) + '</b></div>' + Object.keys(sum).map((k) => '<div class="row"><span>' + esc(k) + '</span><span>' + yen(sum[k]) + '</span></div><div class="bar"><b style="width:' + (all ? (sum[k] / all * 100).toFixed(1) : 0) + '%"></b></div>').join('') + '</section>';
   }
   if (D.bookings.length) h += '<section class="card"><h2>移動・見学</h2>' + D.bookings.map((b) => '<div class="row"><span>' + esc(b.title) + '</span><span class="sub">' + esc(b.kind) + '</span></div>').join('') + '</section>';
-  h += '<footer>この旅は <a href="' + esc(D.appUrl) + '">旅帳</a> でまとめました' + (Object.keys(G).length ? '<br>地図: 地球地図日本（国土地理院）を加工' : '') + '</footer>';
+  h += '<footer>この旅は <a href="' + esc(D.appUrl) + '">たび帳</a> でまとめました' + (Object.keys(G).length ? '<br>地図: 地球地図日本（国土地理院）を加工' : '') + '</footer>';
   return h;
 }
 
@@ -211,7 +211,7 @@ const VIEWER = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>__TITLE__ - 旅帳</title>
+<title>__TITLE__ - たび帳</title>
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box}
@@ -287,7 +287,7 @@ export async function shareImage(store: Store, b: ShareBuild, geo: Record<string
   g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
 
   // 見出し
-  font(26, 700); g.fillStyle = C.gold; g.fillText('旅帳  TRAVEL LOG', P, 118);
+  font(26, 700); g.fillStyle = C.gold; g.fillText('たび帳  TRAVEL LOG', P, 118);
   let size = 76; font(size, 800); while (size > 44 && g.measureText(b.name).width > W - P * 2) { size -= 4; font(size, 800); }
   g.fillStyle = C.ink; g.fillText(fitText(b.name, W - P * 2), P, 210);
   const fmt = (d: Date) => d.getFullYear() + '.' + (d.getMonth() + 1) + '.' + d.getDate();
@@ -378,6 +378,6 @@ export async function shareImage(store: Store, b: ShareBuild, geo: Record<string
       g.drawImage(im, (im.width - sw) / 2, (im.height - sh) / 2, sw, sh, x, y, cell, ch); g.restore(); im.close();
     });
   }
-  font(24, 400); g.fillStyle = C.muted; g.fillText('旅帳でまとめました　' + appUrl.replace(/^https?:\/\//, '').replace(/\/$/, ''), P, H - 56);
+  font(24, 400); g.fillStyle = C.muted; g.fillText('たび帳でまとめました　' + appUrl.replace(/^https?:\/\//, '').replace(/\/$/, ''), P, H - 56);
   return await new Promise<Blob>((ok, ng) => cv.toBlob((bl) => (bl ? ok(bl) : ng(new Error('画像を作れませんでした'))), 'image/png'));
 }

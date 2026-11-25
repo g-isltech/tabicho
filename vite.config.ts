@@ -7,10 +7,10 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'japan.json', 'sample-trip.zip'],
+      includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'maskable-512.png', 'apple-touch-icon.png', 'japan.json', 'sample-trip.zip'],
       manifest: {
-        name: '旅帳',
-        short_name: '旅帳',
+        name: 'たび帳',
+        short_name: 'たび帳',
         description: '長い旅の行程・予約・お金・やりたいこと・日記を、地図と一緒に管理するアプリ',
         lang: 'ja',
         start_url: '/tabicho/',
@@ -21,7 +21,7 @@ export default defineConfig({
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+          { src: 'maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
       workbox: { globPatterns: ['**/*.{js,css,html,json,svg,png,zip}'] }
