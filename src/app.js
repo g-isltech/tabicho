@@ -141,8 +141,11 @@ export function startApp(ctx) {
     const fn = { map: vMap, plan: vPlan, book: vBook, money: vMoney, wish: vWish, diary: vDiary }[UI.view];
     const keep = UI.view === 'map' && $('#mapsvg');
     if (keep) { updateMap(sch, ti); const ms = $('#mapsel'); if (ms) ms.innerHTML = mapSel(sch, ti); return; }
+    if (UI.stopLazy) UI.stopLazy();
     $('#view').innerHTML = (ctx.readonly ? '<p class="ro-note">もらった旅です。見るだけで、書き換えはできません。設定の「この旅をもとに作る」で、自分の旅にできます</p>' : '') + fn(sch, ti);
     if (UI.view === 'map') { initMap(); updateMap(sch, ti); }
+    // 日記の写真は、画面に見えてきたものから小さな写真を読み込む
+    UI.stopLazy = ctx.assets.lazy($('#view'));
   }
 
   // ---------- 地図 ----------
@@ -772,7 +775,7 @@ export function startApp(ctx) {
       '<label class="f">いた場所<input class="i" id="diary-place" value="' + esc(place) + '" placeholder="' + esc(planned ? '空のままなら「' + planned + '」になります' : '例: 函館') + '"></label>' +
       (planned && !place ? '<p class="sub">行程では、この日は「' + esc(planned) + '」の予定です。違う所にいたら、場所を入れてください</p>' : (planned && planned !== place ? '<p class="sub">行程では、この日は「' + esc(planned) + '」の予定です</p>' : '')) +
       '<label class="f">' + mdw(dd) + 'のこと<textarea class="i" id="diary-text" placeholder="行った所、食べた物、ひと言">' + esc(e.text) + '</textarea></label>' +
-      (photos.length ? '<div class="photos">' + photos.map((p) => '<div class="ph-wrap"><button type="button" class="view" data-view-photo="' + esc(p) + '" aria-label="写真を大きく見る"><img src=\"' + esc(ctx.assets.src(p)) + '" alt="' + esc(mdw(dd)) + 'の写真" loading="lazy"></button>' +
+      (photos.length ? '<div class="photos">' + photos.map((p) => '<div class="ph-wrap"><button type="button" class="view" data-view-photo="' + esc(p) + '" aria-label="写真を大きく見る"><img data-thumb="' + esc(p) + '" alt="' + esc(mdw(dd)) + 'の写真"></button>' +
         (can() ? '<button type="button" class="x" data-del-photo="' + esc(p) + '" aria-label="この写真を外す">×</button>' : '') + '</div>').join('') + '</div>' : '') +
       '<div class="row"><button class="btn primary grow" id="diary-save"' + (can() ? '' : ' disabled') + '>保存</button>' +
       (S.assets ? '<label class="btn" for="diary-photo">写真を追加</label><input type="file" id="diary-photo" accept="image/*" multiple hidden>' : '') + '</div>' +
@@ -792,7 +795,7 @@ export function startApp(ctx) {
       const ph = Array.isArray(d.photos) ? d.photos : [];
       h += '<article class="entry' + (x === k ? ' editing' : '') + '"><div class="entry-h"><b>' + mdw(dt) + '</b><span class="sub">' + esc(pl || '場所なし') + '</span>' + (x === k ? '<span class="pill booked">編集中</span>' : '') + '</div>' +
         (String(d.text || '').trim() ? '<p class="entry-text">' + esc(d.text) + '</p>' : '') +
-        (ph.length ? '<div class="strip">' + ph.map((p) => '<button type="button" data-view-photo="' + esc(p) + '" aria-label="写真を大きく見る"><img src=\"' + esc(ctx.assets.src(p)) + '" alt="' + esc(mdw(dt)) + 'の写真" loading="lazy"></button>').join('') + '</div>' : '') +
+        (ph.length ? '<div class="strip">' + ph.map((p) => '<button type="button" data-view-photo="' + esc(p) + '" aria-label="写真を大きく見る"><img data-thumb="' + esc(p) + '" alt="' + esc(mdw(dt)) + 'の写真"></button>').join('') + '</div>' : '') +
         (can() ? '<div class="row"><button class="btn small" data-edit-diary="' + esc(x) + '">直す</button></div>' : '') + '</article>';
     });
     return h + '</section>';
@@ -858,7 +861,7 @@ export function startApp(ctx) {
     if (t.id === 'diary-save') { saveDiary([]); return; }
     if (t.dataset.editDiary) { UI.diaryAuto = false; UI.diaryDate = t.dataset.editDiary; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
     if (t.dataset.dorder) { UI.diaryOrder = t.dataset.dorder; render(); return; }
-    if (t.dataset.viewPhoto) { openSheet('<img class="big-photo" src=\"' + esc(ctx.assets.src(t.dataset.viewPhoto)) + '" alt="写真"><button class="btn" type="button" data-close>閉じる</button>'); return; }
+    if (t.dataset.viewPhoto) { const vid = t.dataset.viewPhoto; openSheet('<img class="big-photo" id="big-photo" alt="写真"><button class="btn" type="button" data-close>閉じる</button>'); ctx.assets.full(vid).then((u) => { const im = $('#big-photo'); if (im && u) im.src = u; }); return; }
     if (t.dataset.delPhoto) {
       const id = t.dataset.delPhoto;
       if (t.dataset.armed) { await saveDiary([], id); if (S.assets) { try { await S.assets.delete(id); } catch (er) {} } return; }
@@ -933,8 +936,7 @@ export function startApp(ctx) {
     db.collection('expenses').onSnapshot((s) => { S.expenses = map(s).map(normMoney).map((e) => ({ ...e, date: e.date || iso(today()), cat: str(e.cat), memo: str(e.memo) })); S.loaded.expenses = true; refreshAutoBox(); render(); });
     db.collection('diary').onSnapshot(async (s) => {
       const o = {}; s.docs.forEach((d) => { o[d.id] = d.data(); }); S.diary = o;
-      const ids = Object.values(o).flatMap((d) => (d && Array.isArray(d.photos) ? d.photos : []));
-      await ctx.assets.preload(ids); render();
+      render();
     });
     db.doc('meta/trip').onSnapshot((d) => { if (d.exists) S.trip = { start: iso(today()), ...d.data() }; render(); });
     db.doc('meta/budget').onSnapshot((d) => { S.budget = d.exists ? d.data() : null; render(); });

@@ -146,20 +146,7 @@ async function shareSheet(current: Trip): Promise<void> {
   }));
 }
 // まとめ画像に入れる写真を、日記の写真から4枚まで選ぶ。選んだものは覚えておく。
-// 写真が何百枚あっても重くならないよう、画面に見えてきた写真だけを小さく縮めて読み込む（縮めたものは覚えておく）
-const thumbCache = new Map<string, string>();
-async function makeThumb(id: string): Promise<string> {
-  const hit = thumbCache.get(id); if (hit) return hit;
-  const blob = await store.getPhoto(id); if (!blob) return '';
-  let bmp: ImageBitmap;
-  try { bmp = await createImageBitmap(blob, { resizeWidth: 240, resizeQuality: 'medium' }); } catch { bmp = await createImageBitmap(blob); }
-  const k = Math.min(1, 240 / Math.max(bmp.width, bmp.height));
-  const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
-  cv.getContext('2d')!.drawImage(bmp, 0, 0, cv.width, cv.height); bmp.close();
-  const small = await new Promise<Blob | null>((ok) => cv.toBlob(ok, 'image/jpeg', 0.7));
-  const url = small ? URL.createObjectURL(small) : ''; if (url) thumbCache.set(id, url);
-  return url;
-}
+// 一覧には、日記と同じ小さな写真を、画面に見えてきたものから読み込む
 async function pickPhotos(tid: string): Promise<string[] | null> {
   const days = store.list('trips/' + tid + '/diary').filter((r) => Array.isArray(r.data?.photos) && (r.data!.photos as string[]).length).sort((a, b) => (a.id < b.id ? -1 : 1));
   const all = days.flatMap((r) => (r.data!.photos as string[]).map((id) => ({ id, day: r.id })));
@@ -183,19 +170,7 @@ async function pickPhotos(tid: string): Promise<string[] | null> {
       $('#pk-count')!.textContent = n + ' / 4 枚を選んでいます';
     };
     boxes.forEach((b) => b.addEventListener('change', update)); update();
-    // 見えてきた写真だけ、順番に（同時に3枚まで）読み込む
-    const queue: HTMLImageElement[] = []; let running = 0;
-    const pump = () => {
-      while (running < 3 && queue.length) {
-        const img = queue.shift()!; running++;
-        makeThumb(img.dataset.thumb!).then((u) => { if (u) img.src = u; }).catch(() => {}).finally(() => { running--; pump(); });
-      }
-    };
-    const root = document.querySelector('.sheet');
-    io = new IntersectionObserver((ents) => ents.forEach((e) => {
-      if (!e.isIntersecting) return; const img = e.target as HTMLImageElement; io!.unobserve(img); queue.push(img); pump();
-    }), { root, rootMargin: '400px 0px' });
-    document.querySelectorAll<HTMLImageElement>('[data-thumb]').forEach((img) => io!.observe(img));
+    io = { disconnect: photos.lazy(document.querySelector('.sheet')!, document.querySelector('.sheet')) } as unknown as IntersectionObserver;
     $('#pk-ok')!.addEventListener('click', async () => {
       const ids = boxes.filter((b) => b.checked).map((b) => b.dataset.pk!);
       try { await store.setSetting(key, ids); } catch { /* 覚えられなくても続ける */ }

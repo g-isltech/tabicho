@@ -18,6 +18,8 @@ export interface PhotoRecord {
   id: string;
   blob: Blob;
   createdAt: number;
+  /** 一覧用の小さな写真（長い辺320px）。前の版で入れた写真にはないので、初めて表示するときに作って足す */
+  thumb?: Blob;
 }
 
 export interface DocSnapshot {
@@ -105,7 +107,12 @@ export class Store {
   }
 
   // ---- 写真 ----
-  async putPhoto(id: string, blob: Blob): Promise<void> { await this.db.put('photos', { id, blob, createdAt: Date.now() } satisfies PhotoRecord); }
+  async putPhoto(id: string, blob: Blob, thumb?: Blob): Promise<void> { await this.db.put('photos', { id, blob, createdAt: Date.now(), ...(thumb ? { thumb } : {}) } satisfies PhotoRecord); }
+  async getThumb(id: string): Promise<Blob | undefined> { const r = (await this.db.get('photos', id)) as PhotoRecord | undefined; return r?.thumb; }
+  async setThumb(id: string, thumb: Blob): Promise<void> {
+    const r = (await this.db.get('photos', id)) as PhotoRecord | undefined;
+    if (r) await this.db.put('photos', { ...r, thumb } satisfies PhotoRecord);
+  }
   async getPhoto(id: string): Promise<Blob | undefined> { const r = (await this.db.get('photos', id)) as PhotoRecord | undefined; return r?.blob; }
   async deletePhoto(id: string): Promise<void> { await this.db.delete('photos', id); }
   async allPhotoIds(): Promise<string[]> { return (await this.db.getAllKeys('photos')) as string[]; }
