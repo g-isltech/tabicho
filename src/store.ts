@@ -97,10 +97,12 @@ export class Store {
     return n;
   }
 
-  async removeTrip(prefix: string): Promise<void> {
+  /** 旅を消す。tripId の旅の中身だけを消す（ID の頭が同じ別の旅は消さない） */
+  async removeTrip(tripId: string): Promise<void> {
+    const self = 'trips/' + tripId, inside = self + '/';
     const tx = this.db.transaction('docs', 'readwrite');
     for (const [path, r] of this.docs) {
-      if (path.startsWith(prefix)) { const d = { ...r, data: null, deleted: true, updatedAt: Date.now() }; this.docs.set(path, d); await tx.store.put(d); }
+      if (path === self || path.startsWith(inside)) { const d = { ...r, data: null, deleted: true, updatedAt: Date.now() }; this.docs.set(path, d); await tx.store.put(d); }
     }
     await tx.done;
     this.anyListeners.forEach((f) => f());
@@ -116,6 +118,17 @@ export class Store {
   async getPhoto(id: string): Promise<Blob | undefined> { const r = (await this.db.get('photos', id)) as PhotoRecord | undefined; return r?.blob; }
   async deletePhoto(id: string): Promise<void> { await this.db.delete('photos', id); }
   async allPhotoIds(): Promise<string[]> { return (await this.db.getAllKeys('photos')) as string[]; }
+
+  /** どの日記からも使われていない写真のうち、作ってから olderThanMs 以上たったものを消す。消した枚数を返す */
+  async removeUnusedPhotos(olderThanMs: number): Promise<number> {
+    const used = new Set<string>();
+    this.docs.forEach((r) => { if (!r.deleted && r.col.endsWith('/diary') && Array.isArray(r.data?.photos)) (r.data!.photos as string[]).forEach((id) => used.add(id)); });
+    const limit = Date.now() - olderThanMs; const drop: string[] = [];
+    let cur = await this.db.transaction('photos').store.openCursor();
+    while (cur) { const v = cur.value as PhotoRecord; if (!used.has(v.id) && (v.createdAt || 0) < limit) drop.push(v.id); cur = await cur.continue(); }
+    for (const id of drop) await this.db.delete('photos', id);
+    return drop.length;
+  }
 
   // ---- 設定（端末ごと） ----
   async getSetting<T>(key: string): Promise<T | undefined> { return (await this.db.get('settings', key)) as T | undefined; }

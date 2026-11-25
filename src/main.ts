@@ -283,15 +283,35 @@ async function settings(current: Trip): Promise<void> {
   $('#st-del')!.addEventListener('click', () => {
     $('#st-confirm')!.innerHTML = '<div class="banner row"><span class="grow">「' + esc(current.name) + '」の行程・予約・お金・やりたいこと・日記を消します。元に戻せません。先に書き出しておくと安心です</span><button class="btn small danger" type="button" id="st-del2">消す</button></div>';
     $('#st-del2')!.addEventListener('click', async () => {
-      await store.removeTrip('trips/' + current.id);
+      await store.removeTrip(current.id);
+      // 消した旅の写真も消す（ほかの旅の日記で使っている写真は残す）
+      try { await store.removeUnusedPhotos(0); } catch { /* 写真が残っても、次の起動で片付ける */ }
       await store.setSetting('currentTrip', null); location.reload();
     });
   });
 }
 
 // ---------- 起動 ----------
+// 旅帳を2つの画面（タブ）で同時に開いていると、片方の変更をもう片方が知らずに上書きしてしまう。
+// 同じ端末のほかの画面と声をかけ合い、見つけたら注意を出す
+function watchOtherTabs(): void {
+  if (!('BroadcastChannel' in window)) return;
+  const ch = new BroadcastChannel('tabicho'); const me = Math.random().toString(36).slice(2);
+  const warn = () => {
+    if ($('#tab-warning')) return;
+    const b = document.createElement('div'); b.id = 'tab-warning'; b.className = 'banner export-banner'; b.setAttribute('role', 'alert');
+    b.textContent = '旅帳が別の画面（タブやホーム画面のアプリ）でも開いています。両方で書き換えると、片方の変更が消えることがあります。使わない方を閉じてください';
+    $('#view')!.before(b);
+  };
+  ch.onmessage = (e) => { const m = e.data || {}; if (m.from === me) return; if (m.type === 'hello') ch.postMessage({ type: 'here', from: me }); if (m.type === 'hello' || m.type === 'here') warn(); };
+  ch.postMessage({ type: 'hello', from: me });
+}
+
 async function boot(): Promise<void> {
   await store.open();
+  watchOtherTabs();
+  // 使われていない写真（前の版で消した旅の写真など）を、少し後で片付ける。保存の途中の写真を消さないよう、1日以上前のものだけ
+  setTimeout(() => { store.removeUnusedPhotos(86400000).catch(() => {}); }, 5000);
   try { await navigator.storage?.persist?.(); } catch { /* 対応していない端末もある */ }
   const list = trips();
   let tid = await store.getSetting<string | null>('currentTrip');
