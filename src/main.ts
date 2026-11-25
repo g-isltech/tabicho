@@ -145,7 +145,21 @@ async function shareSheet(current: Trip): Promise<void> {
     $('#sh-save')!.addEventListener('click', async () => { const r = await saveFile(blob, name); if (r !== 'cancelled') { closeSheet(); toast('できました'); } });
   }));
 }
-// まとめ画像に入れる写真を、日記の写真から4枚まで選ぶ。選んだものは覚えておく
+// まとめ画像に入れる写真を、日記の写真から4枚まで選ぶ。選んだものは覚えておく。
+// 写真が何百枚あっても重くならないよう、画面に見えてきた写真だけを小さく縮めて読み込む（縮めたものは覚えておく）
+const thumbCache = new Map<string, string>();
+async function makeThumb(id: string): Promise<string> {
+  const hit = thumbCache.get(id); if (hit) return hit;
+  const blob = await store.getPhoto(id); if (!blob) return '';
+  let bmp: ImageBitmap;
+  try { bmp = await createImageBitmap(blob, { resizeWidth: 240, resizeQuality: 'medium' }); } catch { bmp = await createImageBitmap(blob); }
+  const k = Math.min(1, 240 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+  cv.getContext('2d')!.drawImage(bmp, 0, 0, cv.width, cv.height); bmp.close();
+  const small = await new Promise<Blob | null>((ok) => cv.toBlob(ok, 'image/jpeg', 0.7));
+  const url = small ? URL.createObjectURL(small) : ''; if (url) thumbCache.set(id, url);
+  return url;
+}
 async function pickPhotos(tid: string): Promise<string[] | null> {
   const days = store.list('trips/' + tid + '/diary').filter((r) => Array.isArray(r.data?.photos) && (r.data!.photos as string[]).length).sort((a, b) => (a.id < b.id ? -1 : 1));
   const all = days.flatMap((r) => (r.data!.photos as string[]).map((id) => ({ id, day: r.id })));
@@ -154,19 +168,14 @@ async function pickPhotos(tid: string): Promise<string[] | null> {
   let chosen: string[] = [];
   try { chosen = ((await store.getSetting<string[]>(key)) || []).filter((id) => all.some((p) => p.id === id)); } catch { /* 初めて */ }
   if (!chosen.length) chosen = all.slice(0, 4).map((p) => p.id);
-  const urls: string[] = [];
-  const thumbs: string[] = [];
-  for (const p of all) {
-    const blob = await store.getPhoto(p.id); const u = blob ? URL.createObjectURL(blob) : ''; if (u) urls.push(u);
-    const [, m, d] = p.day.split('-').map(Number);
-    thumbs.push('<label class="pk-photo"><input type="checkbox" data-pk="' + esc(p.id) + '"' + (chosen.includes(p.id) ? ' checked' : '') + '><img src="' + u + '" alt="' + m + '月' + d + '日の写真"><span>' + m + '/' + d + '</span></label>');
-  }
+  const dayLabel = (iso: string) => { const [, m, d] = iso.split('-').map(Number); return m + '月' + d + '日'; };
+  const groups = days.map((r) => '<h3 class="pk-day">' + dayLabel(r.id) + '<span class="sub">' + (r.data!.photos as string[]).length + '枚</span></h3><div class="pk-grid">' +
+    (r.data!.photos as string[]).map((id) => '<label class="pk-photo"><input type="checkbox" data-pk="' + esc(id) + '"' + (chosen.includes(id) ? ' checked' : '') + ' aria-label="' + dayLabel(r.id) + 'の写真"><img data-thumb="' + esc(id) + '" alt=""></label>').join('') + '</div>').join('');
   return await new Promise((resolve) => {
-    const done = (v: string[] | null) => { urls.forEach((u) => URL.revokeObjectURL(u)); resolve(v); };
-    sheet('<h2>入れる写真を選ぶ</h2><p class="sub" style="margin:0">4枚まで選べます。選んだ順ではなく、日付の順に並びます</p>' +
-      '<div class="pk-grid">' + thumbs.join('') + '</div><p class="sub" id="pk-count" style="margin:0"></p>' +
-      '<div class="row"><button class="btn primary grow" type="button" id="pk-ok">この写真で作る</button><button class="btn" type="button" id="pk-none">写真なしで作る</button></div>' +
-      '<button class="btn" type="button" id="pk-cancel">やめる</button>');
+    let io: IntersectionObserver | null = null;
+    const done = (v: string[] | null) => { io?.disconnect(); resolve(v); };
+    sheet('<h2>入れる写真を選ぶ</h2><p class="sub" style="margin:0">全' + all.length + '枚から4枚まで選べます。画像には日付の順に並びます</p>' + groups +
+      '<div class="pk-foot"><p class="sub" id="pk-count" style="margin:0"></p><button class="btn primary" type="button" id="pk-ok">この写真で作る</button><div class="row"><button class="btn grow" type="button" id="pk-none">写真なしで作る</button><button class="btn grow" type="button" id="pk-cancel">やめる</button></div></div>');
     const boxes = [...document.querySelectorAll<HTMLInputElement>('[data-pk]')];
     const update = () => {
       const n = boxes.filter((b) => b.checked).length;
@@ -174,6 +183,19 @@ async function pickPhotos(tid: string): Promise<string[] | null> {
       $('#pk-count')!.textContent = n + ' / 4 枚を選んでいます';
     };
     boxes.forEach((b) => b.addEventListener('change', update)); update();
+    // 見えてきた写真だけ、順番に（同時に3枚まで）読み込む
+    const queue: HTMLImageElement[] = []; let running = 0;
+    const pump = () => {
+      while (running < 3 && queue.length) {
+        const img = queue.shift()!; running++;
+        makeThumb(img.dataset.thumb!).then((u) => { if (u) img.src = u; }).catch(() => {}).finally(() => { running--; pump(); });
+      }
+    };
+    const root = document.querySelector('.sheet');
+    io = new IntersectionObserver((ents) => ents.forEach((e) => {
+      if (!e.isIntersecting) return; const img = e.target as HTMLImageElement; io!.unobserve(img); queue.push(img); pump();
+    }), { root, rootMargin: '400px 0px' });
+    document.querySelectorAll<HTMLImageElement>('[data-thumb]').forEach((img) => io!.observe(img));
     $('#pk-ok')!.addEventListener('click', async () => {
       const ids = boxes.filter((b) => b.checked).map((b) => b.dataset.pk!);
       try { await store.setSetting(key, ids); } catch { /* 覚えられなくても続ける */ }

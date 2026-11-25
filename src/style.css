@@ -237,8 +237,10 @@ body{overflow-wrap:break-word}
 /* まとめ画像の写真を選ぶ */
 .pk-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .pk-photo{position:relative;display:block;border-radius:10px;overflow:hidden;cursor:pointer}
-.pk-photo img{width:100%;aspect-ratio:1;object-fit:cover;display:block;max-width:100%}
+.pk-photo img{width:100%;aspect-ratio:1;object-fit:cover;display:block;max-width:100%;background:var(--sunk)}
 .pk-photo input{position:absolute;top:6px;left:6px;width:24px;height:24px;margin:0;accent-color:var(--road)}
-.pk-photo span{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;border-radius:6px;padding:1px 6px}
 .pk-photo:has(input:checked){outline:3px solid var(--road);outline-offset:-3px}
 .pk-photo:has(input:disabled) img{opacity:.45}
+.pk-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pk-day{display:flex;justify-content:space-between;align-items:baseline;margin:8px 0 0;font-size:15px}
+.pk-foot{position:sticky;bottom:calc(-20px - env(safe-area-inset-bottom,0px));background:var(--surface);padding:12px 0 calc(8px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px;margin-top:8px}
