@@ -250,7 +250,7 @@ __BODY__
  */
 const PREF_NAMES = ['北海道', '青森', '岩手', '宮城', '秋田', '山形', '福島', '茨城', '栃木', '群馬', '埼玉', '千葉', '東京', '神奈川', '新潟', '富山', '石川', '福井', '山梨', '長野', '岐阜', '静岡', '愛知', '三重', '滋賀', '京都', '大阪', '兵庫', '奈良', '和歌山', '鳥取', '島根', '岡山', '広島', '山口', '徳島', '香川', '愛媛', '高知', '福岡', '佐賀', '長崎', '熊本', '大分', '宮崎', '鹿児島', '沖縄'];
 
-export async function shareImage(store: Store, b: ShareBuild, geo: Record<string, string> | null, appUrl: string): Promise<Blob> {
+export async function shareImage(store: Store, b: ShareBuild, geo: Record<string, string> | null, appUrl: string, pick?: string[]): Promise<Blob> {
   const get = (col: string) => b.records.filter((r) => r.col === 'trips/' + b.tripId + '/' + col).map((r) => ({ id: r.id, ...(r.data || {}) }) as Data & { id: string });
   const meta = b.records.find((r) => r.path === 'trips/' + b.tripId + '/meta/trip')?.data || {};
   const relative = !!meta.relative; const start = parseD(String(meta.start || DUMMY_START));
@@ -263,7 +263,9 @@ export async function shareImage(store: Store, b: ShareBuild, geo: Record<string
   stops.forEach((s) => { const i = PREF_NAMES.findIndex((p) => String(s.pref || '').startsWith(p)); if (i >= 0) visited.add(String(i + 1).padStart(2, '0')); });
   // 行程の文（同じ場所が続くときは1つにまとめる）
   const chain: string[] = []; stops.forEach((s) => { if (s.kind === 'S') return; const pl = String(s.place || ''); if (pl && chain[chain.length - 1] !== pl) chain.push(pl); }); // 船中泊は行程の文に入れない
-  const photoIds = get('diary').sort((a, c) => (a.id < c.id ? -1 : 1)).flatMap((d) => (d.photos as string[]) || []).slice(0, 4);
+  // 選んだ写真があればそれを使う（写真を見せない設定のときは入れない）。なければ日記の日付順に最大4枚
+  const allIds = get('diary').sort((a, c) => (a.id < c.id ? -1 : 1)).flatMap((d) => (d.photos as string[]) || []);
+  const photoIds = (pick ? pick.filter((id) => allIds.includes(id)) : allIds).slice(0, 4);
   const imgs: ImageBitmap[] = [];
   for (const id of photoIds) { const blob = await store.getPhoto(id); if (blob) { try { imgs.push(await createImageBitmap(blob)); } catch { /* 読めない写真は飛ばす */ } } }
 

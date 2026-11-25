@@ -115,6 +115,13 @@ async function shareSheet(current: Trip): Promise<void> {
     document.querySelectorAll<HTMLInputElement>('[data-sh]').forEach((i) => { (opt as unknown as Record<string, boolean>)[i.dataset.sh!] = i.checked; });
     try { await store.setSetting('shareOptions', opt); } catch { /* 覚えられなくても続ける */ }
     const kind = b.dataset.shMake as 'html' | 'zip' | 'png';
+    // まとめ画像で写真を入れるときは、先に写真を選んでもらう
+    let pick: string[] | undefined;
+    if (kind === 'png' && opt.photos) {
+      const chosen = await pickPhotos(current.id);
+      if (chosen === null) return; // やめた
+      pick = chosen;
+    }
     toast('作っています');
     let blob: Blob;
     try {
@@ -123,7 +130,7 @@ async function shareSheet(current: Trip): Promise<void> {
       else if (kind === 'png') {
         let geo: Record<string, string> | null = null;
         try { geo = await (await fetch(import.meta.env.BASE_URL + 'japan.json')).json(); } catch { /* 地図なしで作る */ }
-        blob = await shareImage(store, built, geo, location.origin + import.meta.env.BASE_URL);
+        blob = await shareImage(store, built, geo, location.origin + import.meta.env.BASE_URL, pick);
       }
       else {
         let geo: Record<string, string> | null = null;
@@ -138,6 +145,45 @@ async function shareSheet(current: Trip): Promise<void> {
     $('#sh-save')!.addEventListener('click', async () => { const r = await saveFile(blob, name); if (r !== 'cancelled') { closeSheet(); toast('できました'); } });
   }));
 }
+// まとめ画像に入れる写真を、日記の写真から4枚まで選ぶ。選んだものは覚えておく
+async function pickPhotos(tid: string): Promise<string[] | null> {
+  const days = store.list('trips/' + tid + '/diary').filter((r) => Array.isArray(r.data?.photos) && (r.data!.photos as string[]).length).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const all = days.flatMap((r) => (r.data!.photos as string[]).map((id) => ({ id, day: r.id })));
+  if (!all.length) return [];
+  const key = 'sharePhotos-' + tid;
+  let chosen: string[] = [];
+  try { chosen = ((await store.getSetting<string[]>(key)) || []).filter((id) => all.some((p) => p.id === id)); } catch { /* 初めて */ }
+  if (!chosen.length) chosen = all.slice(0, 4).map((p) => p.id);
+  const urls: string[] = [];
+  const thumbs: string[] = [];
+  for (const p of all) {
+    const blob = await store.getPhoto(p.id); const u = blob ? URL.createObjectURL(blob) : ''; if (u) urls.push(u);
+    const [, m, d] = p.day.split('-').map(Number);
+    thumbs.push('<label class="pk-photo"><input type="checkbox" data-pk="' + esc(p.id) + '"' + (chosen.includes(p.id) ? ' checked' : '') + '><img src="' + u + '" alt="' + m + '月' + d + '日の写真"><span>' + m + '/' + d + '</span></label>');
+  }
+  return await new Promise((resolve) => {
+    const done = (v: string[] | null) => { urls.forEach((u) => URL.revokeObjectURL(u)); resolve(v); };
+    sheet('<h2>入れる写真を選ぶ</h2><p class="sub" style="margin:0">4枚まで選べます。選んだ順ではなく、日付の順に並びます</p>' +
+      '<div class="pk-grid">' + thumbs.join('') + '</div><p class="sub" id="pk-count" style="margin:0"></p>' +
+      '<div class="row"><button class="btn primary grow" type="button" id="pk-ok">この写真で作る</button><button class="btn" type="button" id="pk-none">写真なしで作る</button></div>' +
+      '<button class="btn" type="button" id="pk-cancel">やめる</button>');
+    const boxes = [...document.querySelectorAll<HTMLInputElement>('[data-pk]')];
+    const update = () => {
+      const n = boxes.filter((b) => b.checked).length;
+      boxes.forEach((b) => { b.disabled = !b.checked && n >= 4; });
+      $('#pk-count')!.textContent = n + ' / 4 枚を選んでいます';
+    };
+    boxes.forEach((b) => b.addEventListener('change', update)); update();
+    $('#pk-ok')!.addEventListener('click', async () => {
+      const ids = boxes.filter((b) => b.checked).map((b) => b.dataset.pk!);
+      try { await store.setSetting(key, ids); } catch { /* 覚えられなくても続ける */ }
+      done(ids);
+    });
+    $('#pk-none')!.addEventListener('click', () => done([]));
+    $('#pk-cancel')!.addEventListener('click', () => { closeSheet(); done(null); });
+  });
+}
+
 // もらった旅をもとに、自分の旅を作る（行程とやりたいことを写す。日記・お金・予約は写さない）
 async function copyTrip(src: Trip): Promise<void> {
   const tid = await createTrip(src.name + '（もとにした旅）', todayIso());
