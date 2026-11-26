@@ -8,7 +8,7 @@
 - 写真は端末の中で縮小してから保存します。撮影場所などの情報はこのとき消えます
 - 地名での場所探しにだけ、国土地理院の住所検索を使います（探す言葉だけを送ります）
 
-公開先: https://g-isltech.github.io/tabicho/
+公開先: https://tabicho.isltech.jp/
 
 ## 開発
 
@@ -33,7 +33,12 @@ npm test         # 自動テスト（vitest）
 ## 公開
 
 `main` に push すると、GitHub Actions がテストとビルドをして GitHub Pages に公開します（`.github/workflows/deploy.yml`）。
-初回だけ、リポジトリの Settings → Pages → Build and deployment の Source を「GitHub Actions」にする必要があります。
+初回だけ、リポジトリの Settings → Pages で次を設定します。
+
+- Build and deployment の Source を「GitHub Actions」にする
+- Custom domain に `tabicho.isltech.jp` を入れ、「Enforce HTTPS」をオンにする（DNS には `tabicho` → `g-isltech.github.io` の CNAME を置く）
+
+ブラウザの中のデータは URL（ドメイン）ごとに分かれて保存されます。公開先のドメインを変えると、利用者は書き出しと読み込みでデータを移す必要があるので、むやみに変えないこと。
 
 ## これからやること
 

@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-// GitHub Pages では https://<owner>.github.io/tabicho/ で公開するため、base を合わせる
+// 独自ドメイン https://tabicho.isltech.jp/ の直下で公開する（GitHub Pages の Custom domain）
 export default defineConfig({
-  base: '/tabicho/',
+  base: '/',
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
@@ -13,8 +13,8 @@ export default defineConfig({
         short_name: 'たび帳',
         description: '長い旅の行程・予約・お金・やりたいこと・日記を、地図と一緒に管理するアプリ',
         lang: 'ja',
-        start_url: '/tabicho/',
-        scope: '/tabicho/',
+        start_url: '/',
+        scope: '/',
         display: 'standalone',
         theme_color: '#1F4FA0',
         background_color: '#E7EDF0',
